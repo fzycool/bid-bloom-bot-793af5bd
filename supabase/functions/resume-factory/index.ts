@@ -34,11 +34,11 @@ serve(async (req) => {
         if (dlError || !fileData) throw new Error(`文件下载失败: ${dlError?.message || "unknown"}`);
 
         const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
+        const isExcel = filePath.endsWith(".xls") || filePath.endsWith(".xlsx") || fileType?.includes("spreadsheet") || fileType?.includes("excel");
         if (isPdf) {
           // For PDF, we'll send as base64 to Gemini which can read PDFs natively
           const arrayBuffer = await fileData.arrayBuffer();
           const uint8Array = new Uint8Array(arrayBuffer);
-          // Use Deno's built-in btoa for base64
           let binary = "";
           for (let i = 0; i < uint8Array.length; i++) {
             binary += String.fromCharCode(uint8Array[i]);
@@ -71,6 +71,45 @@ serve(async (req) => {
           if (!pdfResponse.ok) throw new Error(`PDF提取失败: ${pdfResponse.status}`);
           const pdfData = await pdfResponse.json();
           resumeText = pdfData.choices?.[0]?.message?.content || "";
+        } else if (isExcel) {
+          // For Excel, send as base64 to Gemini which can read spreadsheets
+          const arrayBuffer = await fileData.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let binary = "";
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+          const b64 = btoa(binary);
+          const mimeType = filePath.endsWith(".xlsx")
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "application/vnd.ms-excel";
+
+          await supabase.from("resume_versions").update({ ai_status: "processing" }).eq("id", resumeVersionId);
+
+          const excelResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "google/gemini-2.5-flash",
+              messages: [
+                {
+                  role: "system",
+                  content: "请从上传的Excel简历中提取全部文本内容，保留原始格式和结构。只输出提取的文本，不要添加额外说明。",
+                },
+                {
+                  role: "user",
+                  content: [
+                    { type: "file", file: { filename: `resume.${filePath.endsWith(".xlsx") ? "xlsx" : "xls"}`, file_data: `data:${mimeType};base64,${b64}` } },
+                    { type: "text", text: "请提取这份Excel简历的全部文本内容。" },
+                  ],
+                },
+              ],
+            }),
+          });
+
+          if (!excelResponse.ok) throw new Error(`Excel提取失败: ${excelResponse.status}`);
+          const excelData = await excelResponse.json();
+          resumeText = excelData.choices?.[0]?.message?.content || "";
         } else {
           // Word/txt: extract text directly
           resumeText = await fileData.text();

@@ -693,7 +693,7 @@ export default function ResumeFactory() {
                   className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-accent/50 transition-colors"
                   onClick={() => document.getElementById("resume-file-upload")?.click()}
                 >
-                  <input type="file" id="resume-file-upload" className="hidden" accept=".pdf,.doc,.docx,.txt"
+                  <input type="file" id="resume-file-upload" className="hidden" accept=".pdf,.doc,.docx,.txt,.xls,.xlsx"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) setResumeFile(f); e.target.value = ""; }} />
                   {resumeFile ? (
                     <div className="flex items-center justify-center gap-2">
@@ -707,7 +707,7 @@ export default function ResumeFactory() {
                     <>
                       <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                       <p className="text-sm text-foreground">点击上传简历文件</p>
-                      <p className="text-xs text-muted-foreground mt-1">支持 Word、PDF、TXT</p>
+                      <p className="text-xs text-muted-foreground mt-1">支持 Word、PDF、TXT、Excel</p>
                     </>
                   )}
                 </div>
