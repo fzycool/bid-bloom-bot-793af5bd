@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import KnowledgeBase from "@/components/KnowledgeBase";
 import BidParser from "@/components/BidParser";
+import ResumeFactory from "@/components/ResumeFactory";
 
 const modules = [
   { id: "knowledge", label: "知识库", icon: BookOpen },
@@ -84,13 +85,7 @@ const Dashboard = () => {
         <main className="flex-1 overflow-auto p-6 md:p-8">
           {activeModule === "knowledge" && <KnowledgeBase />}
           {activeModule === "parse" && <BidParser />}
-          {activeModule === "resume" && (
-            <div className="text-muted-foreground text-center py-20">
-              <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">简历智能工场</p>
-              <p className="text-sm">即将上线</p>
-            </div>
-          )}
+          {activeModule === "resume" && <ResumeFactory />}
           {activeModule === "bid" && (
             <div className="text-muted-foreground text-center py-20">
               <ClipboardCheck className="w-12 h-12 mx-auto mb-4 opacity-50" />

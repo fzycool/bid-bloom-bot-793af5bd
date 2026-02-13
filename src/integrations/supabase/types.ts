@@ -139,6 +139,60 @@ export type Database = {
         }
         Relationships: []
       }
+      employees: {
+        Row: {
+          birth_year: number | null
+          certifications: string[] | null
+          created_at: string
+          current_company: string | null
+          current_position: string | null
+          education: string | null
+          gender: string | null
+          id: string
+          major: string | null
+          name: string
+          notes: string | null
+          skills: string[] | null
+          updated_at: string
+          user_id: string
+          years_of_experience: number | null
+        }
+        Insert: {
+          birth_year?: number | null
+          certifications?: string[] | null
+          created_at?: string
+          current_company?: string | null
+          current_position?: string | null
+          education?: string | null
+          gender?: string | null
+          id?: string
+          major?: string | null
+          name: string
+          notes?: string | null
+          skills?: string[] | null
+          updated_at?: string
+          user_id: string
+          years_of_experience?: number | null
+        }
+        Update: {
+          birth_year?: number | null
+          certifications?: string[] | null
+          created_at?: string
+          current_company?: string | null
+          current_position?: string | null
+          education?: string | null
+          gender?: string | null
+          id?: string
+          major?: string | null
+          name?: string
+          notes?: string | null
+          skills?: string[] | null
+          updated_at?: string
+          user_id?: string
+          years_of_experience?: number | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -171,6 +225,77 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      resume_versions: {
+        Row: {
+          ai_status: string
+          content: string | null
+          created_at: string
+          education_history: Json | null
+          employee_id: string
+          file_path: string | null
+          id: string
+          match_details: Json | null
+          match_score: number | null
+          polished_content: string | null
+          project_experiences: Json | null
+          target_industry: string | null
+          target_role: string | null
+          timeline_issues: Json | null
+          updated_at: string
+          user_id: string
+          version_name: string
+          work_experiences: Json | null
+        }
+        Insert: {
+          ai_status?: string
+          content?: string | null
+          created_at?: string
+          education_history?: Json | null
+          employee_id: string
+          file_path?: string | null
+          id?: string
+          match_details?: Json | null
+          match_score?: number | null
+          polished_content?: string | null
+          project_experiences?: Json | null
+          target_industry?: string | null
+          target_role?: string | null
+          timeline_issues?: Json | null
+          updated_at?: string
+          user_id: string
+          version_name?: string
+          work_experiences?: Json | null
+        }
+        Update: {
+          ai_status?: string
+          content?: string | null
+          created_at?: string
+          education_history?: Json | null
+          employee_id?: string
+          file_path?: string | null
+          id?: string
+          match_details?: Json | null
+          match_score?: number | null
+          polished_content?: string | null
+          project_experiences?: Json | null
+          target_industry?: string | null
+          target_role?: string | null
+          timeline_issues?: Json | null
+          updated_at?: string
+          user_id?: string
+          version_name?: string
+          work_experiences?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "resume_versions_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
