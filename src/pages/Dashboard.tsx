@@ -9,14 +9,17 @@ import {
   Users,
   ClipboardCheck,
   CheckCircle,
+  UserCog,
+  Clock,
 } from "lucide-react";
 import KnowledgeBase from "@/components/KnowledgeBase";
 import BidParser from "@/components/BidParser";
 import ResumeFactory from "@/components/ResumeFactory";
 import BiddingAssistant from "@/components/BiddingAssistant";
 import HolographicAudit from "@/components/HolographicAudit";
+import UserManagement from "@/components/UserManagement";
 
-const modules = [
+const baseModules = [
   { id: "knowledge", label: "知识库", icon: BookOpen },
   { id: "parse", label: "招标解析", icon: FileSearch },
   { id: "resume", label: "简历工厂", icon: Users },
@@ -25,8 +28,32 @@ const modules = [
 ];
 
 const Dashboard = () => {
-  const { user, signOut } = useAuth();
+  const { user, isApproved, isAdmin, signOut } = useAuth();
   const [activeModule, setActiveModule] = useState("knowledge");
+
+  const modules = [
+    ...baseModules,
+    ...(isAdmin ? [{ id: "users", label: "用户管理", icon: UserCog }] : []),
+  ];
+
+  // Show pending approval screen for unapproved users
+  if (isApproved === false && !isAdmin) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 p-6">
+        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <Clock className="w-8 h-8 text-muted-foreground" />
+        </div>
+        <h2 className="text-xl font-bold text-foreground">等待管理员审批</h2>
+        <p className="text-sm text-muted-foreground text-center max-w-md">
+          您的账号已注册成功，请等待管理员审批后方可使用系统。
+        </p>
+        <Button variant="outline" size="sm" onClick={signOut} className="mt-4">
+          <LogOut className="w-4 h-4 mr-1" />
+          退出登录
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -90,6 +117,7 @@ const Dashboard = () => {
           {activeModule === "resume" && <ResumeFactory />}
           {activeModule === "bid" && <BiddingAssistant />}
           {activeModule === "audit" && <HolographicAudit />}
+          {activeModule === "users" && isAdmin && <UserManagement />}
         </main>
       </div>
     </div>
