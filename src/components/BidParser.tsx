@@ -56,7 +56,7 @@ export default function BidParser() {
   const [projectName, setProjectName] = useState("");
   const [content, setContent] = useState("");
   const [customPrompt, setCustomPrompt] = useState(
-    "1. 评分标准表（分类、权重、评分细则、佐证材料）\n2. 废标项（★标记、否决投标条款）\n3. 陷阱项（容易忽略的失分条款）\n4. 人员配置要求（角色、数量、资质、证书）\n5. 专业技能/业务技能/职责关键词\n6. 风险评分与总体分析"
+    "1. 投标截止时间，投标地点，是否讲标，投标保证金金额\n2. 评分标准表（分类、权重、评分细则、佐证材料）\n3. 废标项（★标记、否决投标条款）\n4. 陷阱项（容易忽略的失分条款）\n5. 人员配置要求（角色、数量、资质、证书）\n6. 专业技能/业务技能/职责关键词\n7. 风险评分与总体分析"
   );
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [inputMode, setInputMode] = useState<"file" | "text">("file");
@@ -255,7 +255,7 @@ export default function BidParser() {
   // When selecting an analysis, initialize editing prompt
   useEffect(() => {
     if (selectedAnalysis) {
-      setEditingPrompt(selectedAnalysis.custom_prompt || "1. 评分标准表（分类、权重、评分细则、佐证材料）\n2. 废标项（★标记、否决投标条款）\n3. 陷阱项（容易忽略的失分条款）\n4. 人员配置要求（角色、数量、资质、证书）\n5. 专业技能/业务技能/职责关键词\n6. 风险评分与总体分析");
+      setEditingPrompt(selectedAnalysis.custom_prompt || "1. 投标截止时间，投标地点，是否讲标，投标保证金金额\n2. 评分标准表（分类、权重、评分细则、佐证材料）\n3. 废标项（★标记、否决投标条款）\n4. 陷阱项（容易忽略的失分条款）\n5. 人员配置要求（角色、数量、资质、证书）\n6. 专业技能/业务技能/职责关键词\n7. 风险评分与总体分析");
     }
   }, [selectedAnalysis?.id]);
 
