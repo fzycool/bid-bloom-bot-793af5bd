@@ -20,8 +20,8 @@ import {
   BarChart3,
   Trash2,
   Plus,
-  ChevronDown,
-  ChevronUp,
+  Upload,
+  FileText,
 } from "lucide-react";
 
 interface BidAnalysis {
@@ -48,6 +48,8 @@ export default function BidParser() {
   const [analyzing, setAnalyzing] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [content, setContent] = useState("");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [inputMode, setInputMode] = useState<"file" | "text">("file");
   const [selectedAnalysis, setSelectedAnalysis] = useState<BidAnalysis | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -64,15 +66,36 @@ export default function BidParser() {
   useEffect(() => { fetchAnalyses(); }, [fetchAnalyses]);
 
   const handleAnalyze = async () => {
-    if (!content.trim() || !user) {
+    if (inputMode === "text" && !content.trim()) {
       toast({ title: "请粘贴招标文件内容", variant: "destructive" });
       return;
     }
+    if (inputMode === "file" && !uploadedFile) {
+      toast({ title: "请上传招标文件", variant: "destructive" });
+      return;
+    }
+    if (!user) return;
+
     setAnalyzing(true);
+    let filePath: string | undefined;
+
+    // Upload file to storage if in file mode
+    if (inputMode === "file" && uploadedFile) {
+      const storagePath = `${user.id}/${Date.now()}-${uploadedFile.name}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("knowledge-base")
+        .upload(storagePath, uploadedFile);
+      if (uploadErr) {
+        toast({ title: "文件上传失败", description: uploadErr.message, variant: "destructive" });
+        setAnalyzing(false);
+        return;
+      }
+      filePath = storagePath;
+    }
 
     const { data: analysis, error: insertErr } = await supabase
       .from("bid_analyses")
-      .insert({ user_id: user.id, project_name: projectName || "未命名项目" })
+      .insert({ user_id: user.id, project_name: projectName || uploadedFile?.name || "未命名项目" })
       .select()
       .single();
 
@@ -83,23 +106,27 @@ export default function BidParser() {
     }
 
     try {
-      const { data: fnData, error: fnErr } = await supabase.functions.invoke("parse-bid", {
-        body: {
-          analysisId: analysis.id,
-          content: content.substring(0, 30000), // Limit content size
-          projectName: projectName || "未命名项目",
-        },
-      });
+      const body: any = {
+        analysisId: analysis.id,
+        projectName: projectName || uploadedFile?.name || "未命名项目",
+      };
+      if (filePath) {
+        body.filePath = filePath;
+        body.fileType = uploadedFile?.type || "";
+      } else {
+        body.content = content.substring(0, 30000);
+      }
 
+      const { error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
       if (fnErr) throw fnErr;
 
       toast({ title: "解析完成", description: "招标文件已完成智能解析" });
       setContent("");
       setProjectName("");
+      setUploadedFile(null);
       setShowForm(false);
       await fetchAnalyses();
 
-      // Auto-select the new analysis
       const { data: updated } = await supabase
         .from("bid_analyses")
         .select("*")
@@ -391,31 +418,101 @@ export default function BidParser() {
         <Card>
           <CardContent className="p-6 space-y-4">
             <div className="space-y-2">
-              <Label>项目名称</Label>
+              <Label>项目名称（可选）</Label>
               <Input
                 placeholder="例如：XX市智慧城市建设项目"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
               />
             </div>
-            <div className="space-y-2">
-              <Label>招标文件内容</Label>
-              <Textarea
-                placeholder="请粘贴招标文件的关键内容（评分标准、资格要求、人员配置等章节）..."
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="min-h-[200px]"
-              />
-              <p className="text-xs text-muted-foreground">
-                建议粘贴评分标准表、投标人资格要求、人员配置要求等核心章节，最大支持30000字
-              </p>
+
+            {/* Input mode toggle */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setInputMode("file")}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  inputMode === "file"
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                }`}
+              >
+                <Upload className="w-4 h-4" />
+                上传文件
+              </button>
+              <button
+                onClick={() => setInputMode("text")}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  inputMode === "text"
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                粘贴文本
+              </button>
             </div>
+
+            {inputMode === "file" ? (
+              <div className="space-y-2">
+                <Label>上传招标文件</Label>
+                <div
+                  className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-accent/50 hover:bg-accent/5 transition-colors"
+                  onClick={() => document.getElementById("bid-file-upload")?.click()}
+                >
+                  <input
+                    type="file"
+                    id="bid-file-upload"
+                    className="hidden"
+                    accept=".pdf,.doc,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setUploadedFile(file);
+                        if (!projectName) setProjectName(file.name.replace(/\.(pdf|docx?|txt)$/i, ""));
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                  {uploadedFile ? (
+                    <div className="flex items-center justify-center gap-3">
+                      <FileText className="w-8 h-8 text-accent" />
+                      <div className="text-left">
+                        <p className="font-medium text-foreground">{uploadedFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB · 点击更换文件
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm font-medium text-foreground">点击上传招标文件</p>
+                      <p className="text-xs text-muted-foreground mt-1">支持 PDF、Word 格式，最大 20MB</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>招标文件内容</Label>
+                <Textarea
+                  placeholder="请粘贴招标文件的关键内容（评分标准、资格要求、人员配置等章节）..."
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className="min-h-[200px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  建议粘贴评分标准表、投标人资格要求、人员配置要求等核心章节，最大支持30000字
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button onClick={handleAnalyze} disabled={analyzing} className="gap-2">
                 {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSearch className="w-4 h-4" />}
                 {analyzing ? "AI解析中..." : "开始解析"}
               </Button>
-              <Button variant="outline" onClick={() => { setShowForm(false); setContent(""); setProjectName(""); }}>
+              <Button variant="outline" onClick={() => { setShowForm(false); setContent(""); setProjectName(""); setUploadedFile(null); }}>
                 取消
               </Button>
             </div>
