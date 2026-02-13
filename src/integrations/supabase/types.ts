@@ -14,6 +14,71 @@ export type Database = {
   }
   public: {
     Tables: {
+      bid_analyses: {
+        Row: {
+          ai_status: string
+          business_keywords: Json | null
+          created_at: string
+          disqualification_items: Json | null
+          document_id: string | null
+          id: string
+          personnel_requirements: Json | null
+          project_name: string | null
+          responsibility_keywords: Json | null
+          risk_score: number | null
+          scoring_table: Json | null
+          summary: string | null
+          technical_keywords: Json | null
+          trap_items: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_status?: string
+          business_keywords?: Json | null
+          created_at?: string
+          disqualification_items?: Json | null
+          document_id?: string | null
+          id?: string
+          personnel_requirements?: Json | null
+          project_name?: string | null
+          responsibility_keywords?: Json | null
+          risk_score?: number | null
+          scoring_table?: Json | null
+          summary?: string | null
+          technical_keywords?: Json | null
+          trap_items?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_status?: string
+          business_keywords?: Json | null
+          created_at?: string
+          disqualification_items?: Json | null
+          document_id?: string | null
+          id?: string
+          personnel_requirements?: Json | null
+          project_name?: string | null
+          responsibility_keywords?: Json | null
+          risk_score?: number | null
+          scoring_table?: Json | null
+          summary?: string | null
+          technical_keywords?: Json | null
+          trap_items?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bid_analyses_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       documents: {
         Row: {
           ai_metadata: Json | null

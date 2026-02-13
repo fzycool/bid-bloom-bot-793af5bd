@@ -11,6 +11,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import KnowledgeBase from "@/components/KnowledgeBase";
+import BidParser from "@/components/BidParser";
 
 const modules = [
   { id: "knowledge", label: "知识库", icon: BookOpen },
@@ -82,13 +83,7 @@ const Dashboard = () => {
         {/* Main content */}
         <main className="flex-1 overflow-auto p-6 md:p-8">
           {activeModule === "knowledge" && <KnowledgeBase />}
-          {activeModule === "parse" && (
-            <div className="text-muted-foreground text-center py-20">
-              <FileSearch className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">招标文件解析引擎</p>
-              <p className="text-sm">即将上线</p>
-            </div>
-          )}
+          {activeModule === "parse" && <BidParser />}
           {activeModule === "resume" && (
             <div className="text-muted-foreground text-center py-20">
               <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
