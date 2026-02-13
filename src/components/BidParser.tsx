@@ -81,7 +81,9 @@ export default function BidParser() {
 
     // Upload file to storage if in file mode
     if (inputMode === "file" && uploadedFile) {
-      const storagePath = `${user.id}/${Date.now()}-${uploadedFile.name}`;
+      const fileExt = uploadedFile.name.split('.').pop() || 'bin';
+      const safeFileName = `${Date.now()}.${fileExt}`;
+      const storagePath = `${user.id}/${safeFileName}`;
       const { error: uploadErr } = await supabase.storage
         .from("knowledge-base")
         .upload(storagePath, uploadedFile);
