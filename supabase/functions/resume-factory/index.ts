@@ -154,7 +154,7 @@ serve(async (req) => {
         project_experiences: result.project_experiences || [],
         education_history: result.education_history || [],
         timeline_issues: result.timeline_issues || [],
-        content,
+        content: resumeText || content,
         ai_status: "completed",
       }).eq("id", resumeVersionId);
 
