@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      documents: {
+        Row: {
+          ai_metadata: Json | null
+          ai_status: string
+          ai_summary: string | null
+          amount_range: string | null
+          created_at: string
+          doc_category: string | null
+          doc_year: number | null
+          file_name: string
+          file_path: string
+          file_size: number
+          file_type: string | null
+          id: string
+          industry: string | null
+          owner_name: string | null
+          tags: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_metadata?: Json | null
+          ai_status?: string
+          ai_summary?: string | null
+          amount_range?: string | null
+          created_at?: string
+          doc_category?: string | null
+          doc_year?: number | null
+          file_name: string
+          file_path: string
+          file_size?: number
+          file_type?: string | null
+          id?: string
+          industry?: string | null
+          owner_name?: string | null
+          tags?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_metadata?: Json | null
+          ai_status?: string
+          ai_summary?: string | null
+          amount_range?: string | null
+          created_at?: string
+          doc_category?: string | null
+          doc_year?: number | null
+          file_name?: string
+          file_path?: string
+          file_size?: number
+          file_type?: string | null
+          id?: string
+          industry?: string | null
+          owner_name?: string | null
+          tags?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
