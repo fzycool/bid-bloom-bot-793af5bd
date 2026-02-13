@@ -184,7 +184,7 @@ serve(async (req) => {
 
     // ---- ACTION: match-resume (compare resume against bid requirements) ----
     if (action === "match-resume") {
-      const { resumeVersionId, bidAnalysisId, customPrompt } = params;
+      const { resumeVersionId, bidAnalysisId, targetRole, customPrompt } = params;
 
       // Fetch resume and bid data
       const [{ data: resume }, { data: bid }] = await Promise.all([
@@ -194,12 +194,21 @@ serve(async (req) => {
 
       if (!resume || !bid) throw new Error("简历或招标数据不存在");
 
+      // Find specific role requirements if targetRole specified
+      const roleReq = targetRole ? (bid.personnel_requirements as any[] || []).find((r: any) => r.role === targetRole) : null;
+
       await supabase.from("resume_versions").update({ ai_status: "matching" }).eq("id", resumeVersionId);
 
-      let systemContent = `你是招投标人员配置专家。请分析简历与招标要求的匹配度，返回JSON：
+      let systemContent = `你是招投标人员配置专家。`;
+      if (targetRole && roleReq) {
+        systemContent += `请重点针对"${targetRole}"这一岗位的具体要求来分析候选人的匹配度。`;
+      }
+      systemContent += `请返回JSON：
 {
   "match_score": 0-100的匹配度分数,
   "match_details": {
+    "target_role": "${targetRole || "综合评估"}",
+    "role_requirements_met": "针对目标岗位各项要求的逐条分析",
     "strengths": ["优势1", "优势2"],
     "weaknesses": ["不足1", "不足2"],
     "missing_keywords": ["缺失关键词1"],
@@ -216,17 +225,12 @@ serve(async (req) => {
       }
       systemContent += `\n请严格输出纯JSON。`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: systemContent },
-            {
-              role: "user",
-              content: `【招标要求】
-人员要求: ${JSON.stringify(bid.personnel_requirements)}
+      let userContent = `【招标要求】\n`;
+      if (targetRole && roleReq) {
+        userContent += `🎯 目标岗位: ${targetRole}\n`;
+        userContent += `岗位详细要求: ${JSON.stringify(roleReq)}\n\n`;
+      }
+      userContent += `全部人员要求: ${JSON.stringify(bid.personnel_requirements)}
 技术关键词: ${JSON.stringify(bid.technical_keywords)}
 业务关键词: ${JSON.stringify(bid.business_keywords)}
 职责关键词: ${JSON.stringify(bid.responsibility_keywords)}
@@ -239,8 +243,16 @@ serve(async (req) => {
 证书: ${JSON.stringify((resume as any).employees?.certifications)}
 工作经历: ${JSON.stringify(resume.work_experiences)}
 项目经验: ${JSON.stringify(resume.project_experiences)}
-学历: ${JSON.stringify(resume.education_history)}`,
-            },
+学历: ${JSON.stringify(resume.education_history)}`;
+
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { role: "system", content: systemContent },
+            { role: "user", content: userContent },
           ],
         }),
       });
@@ -269,28 +281,32 @@ serve(async (req) => {
 
     // ---- ACTION: polish-resume ----
     if (action === "polish-resume") {
-      const { resumeVersionId, bidAnalysisId, customInstructions } = params;
+      const { resumeVersionId, bidAnalysisId, targetRole, customInstructions } = params;
 
       const [{ data: resume }, { data: bid }] = await Promise.all([
         supabase.from("resume_versions").select("*, employees(*)").eq("id", resumeVersionId).single(),
-        bidAnalysisId
+        bidAnalysisId && bidAnalysisId !== "none"
           ? supabase.from("bid_analyses").select("*").eq("id", bidAnalysisId).single()
           : Promise.resolve({ data: null }),
       ]);
 
       if (!resume) throw new Error("简历不存在");
 
+      const roleReq = targetRole && bid ? (bid.personnel_requirements as any[] || []).find((r: any) => r.role === targetRole) : null;
+
       await supabase.from("resume_versions").update({ ai_status: "polishing" }).eq("id", resumeVersionId);
 
       let bidContext = "";
       if (bid) {
-        bidContext = `
-【目标招标项目关键词】
-技术关键词: ${JSON.stringify(bid.technical_keywords)}
+        bidContext = `\n【目标招标项目关键词】\n`;
+        if (targetRole && roleReq) {
+          bidContext += `🎯 目标岗位: ${targetRole}\n`;
+          bidContext += `岗位要求: ${JSON.stringify(roleReq)}\n`;
+        }
+        bidContext += `技术关键词: ${JSON.stringify(bid.technical_keywords)}
 业务关键词: ${JSON.stringify(bid.business_keywords)}
 职责关键词: ${JSON.stringify(bid.responsibility_keywords)}
-人员要求: ${JSON.stringify(bid.personnel_requirements)}
-`;
+全部人员要求: ${JSON.stringify(bid.personnel_requirements)}\n`;
       }
 
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -301,9 +317,9 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: `你是资深投标简历润色专家。你的任务是将候选人的真实简历润色为投标用简历，需要：
+              content: `你是资深投标简历润色专家。你的任务是将候选人的真实简历润色为投标用简历${targetRole ? `，重点针对"${targetRole}"这一岗位` : ""}，需要：
 
-1. **职责对齐**：将日常工作职责映射到招标要求的描述上
+1. **职责对齐**：将日常工作职责映射到${targetRole ? `"${targetRole}"岗位` : "招标"}要求的描述上
 2. **同义替换**：将平淡描述升级为专业表达，如"负责项目"→"主导XX千万级项目全生命周期管理"
 3. **关键词植入**：自然地融入招标要求的技术/业务关键词
 4. **量化增强**：尽量加入具体数据和成果

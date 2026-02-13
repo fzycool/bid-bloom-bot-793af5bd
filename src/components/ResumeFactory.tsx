@@ -93,10 +93,15 @@ export default function ResumeFactory() {
 
   // Match/polish
   const [selectedBidId, setSelectedBidId] = useState<string>("");
+  const [selectedRole, setSelectedRole] = useState<string>("");
   const [polishInstructions, setPolishInstructions] = useState("");
   const [matchPrompt, setMatchPrompt] = useState(
     "1. 分析候选人与招标要求的匹配程度\n2. 列出候选人的核心优势和不足\n3. 标出简历中缺失的关键词\n4. 推荐最适合的投标角色\n5. 给出具体的简历改进建议"
   );
+
+  // Derived: roles from selected bid
+  const selectedBid = bidAnalyses.find((b) => b.id === selectedBidId);
+  const bidRoles = (selectedBid?.personnel_requirements || []) as any[];
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -211,7 +216,7 @@ export default function ResumeFactory() {
     setProcessing(true);
     try {
       const { error } = await supabase.functions.invoke("resume-factory", {
-        body: { action: "match-resume", resumeVersionId: versionId, bidAnalysisId: selectedBidId, customPrompt: matchPrompt.trim() || undefined },
+        body: { action: "match-resume", resumeVersionId: versionId, bidAnalysisId: selectedBidId, targetRole: selectedRole || undefined, customPrompt: matchPrompt.trim() || undefined },
       });
       if (error) throw error;
       toast({ title: "匹配分析完成" });
@@ -230,6 +235,7 @@ export default function ResumeFactory() {
           action: "polish-resume",
           resumeVersionId: versionId,
           bidAnalysisId: selectedBidId || undefined,
+          targetRole: selectedRole || undefined,
           customInstructions: polishInstructions || undefined,
         },
       });
@@ -254,7 +260,7 @@ export default function ResumeFactory() {
     toast({ title: "已复制到剪贴板" });
   };
 
-  const generatePolishInstructions = useCallback((bidId: string) => {
+  const generatePolishInstructions = useCallback((bidId: string, role?: string) => {
     if (!bidId || bidId === "none") return;
     const bid = bidAnalyses.find((b) => b.id === bidId);
     if (!bid) return;
@@ -267,22 +273,37 @@ export default function ResumeFactory() {
     const matched = allBidKws.filter((k) => empSkills.some((s) => k.includes(s) || s.includes(k)));
     const missing = allBidKws.filter((k) => !empSkills.some((s) => k.includes(s) || s.includes(k)));
 
-    let instructions = `【招标关键词与简历对照】\n`;
+    const targetRole = role || selectedRole;
+    const roleObj = targetRole ? (bid.personnel_requirements as any[] || []).find((r: any) => r.role === targetRole) : null;
+
+    let instructions = "";
+
+    if (targetRole && roleObj) {
+      instructions += `【目标岗位】${targetRole}\n`;
+      instructions += `岗位要求：${roleObj.qualifications || "无"}\n`;
+      if (roleObj.certifications?.length) instructions += `所需证书：${roleObj.certifications.join("、")}\n`;
+      if (roleObj.experience_years) instructions += `经验要求：${roleObj.experience_years}年以上\n`;
+      if (roleObj.specific_requirements) instructions += `特殊要求：${roleObj.specific_requirements}\n`;
+      instructions += "\n";
+    }
+
+    instructions += `【招标关键词与简历对照】\n`;
     if (matched.length > 0) instructions += `✅ 已有匹配（需重点强化）：${matched.join("、")}\n`;
     if (missing.length > 0) instructions += `⚠️ 缺失关键词（需从经历中挖掘关联）：${missing.join("、")}\n`;
     if (empCerts.length > 0) instructions += `📜 现有证书：${empCerts.join("、")}\n`;
 
     const roles = (bid.personnel_requirements || []) as any[];
     if (roles.length > 0) {
-      instructions += `\n【招标人员要求】\n`;
+      instructions += `\n【招标全部人员要求】\n`;
       roles.forEach((r: any) => {
-        instructions += `• ${r.role}${r.count ? `(${r.count}人)` : ""}: ${r.qualifications || ""}${r.certifications?.length ? `, 证书:${r.certifications.join("/")}` : ""}${r.experience_years ? `, ${r.experience_years}年+` : ""}\n`;
+        const isTarget = r.role === targetRole;
+        instructions += `${isTarget ? "👉 " : "• "}${r.role}${r.count ? `(${r.count}人)` : ""}: ${r.qualifications || ""}${r.certifications?.length ? `, 证书:${r.certifications.join("/")}` : ""}${r.experience_years ? `, ${r.experience_years}年+` : ""}\n`;
       });
     }
 
-    instructions += `\n【润色要求】\n1. 将简历中的职责描述对齐到招标评分关键词\n2. 对已有匹配技能进行量化强化（加入具体数据和成果）\n3. 对缺失关键词从现有经历中挖掘关联描述\n4. 保持时间线不变，不编造经历`;
+    instructions += `\n【润色要求】\n1. 将简历中的职责描述对齐到${targetRole ? `"${targetRole}"岗位的` : "招标"}评分关键词\n2. 对已有匹配技能进行量化强化（加入具体数据和成果）\n3. 对缺失关键词从现有经历中挖掘关联描述\n4. 保持时间线不变，不编造经历`;
     setPolishInstructions(instructions);
-  }, [bidAnalyses, selectedEmployee]);
+  }, [bidAnalyses, selectedEmployee, selectedRole]);
 
   // ====== VERSION DETAIL VIEW ======
   if (selectedVersion) {
@@ -356,16 +377,31 @@ export default function ResumeFactory() {
 
           <TabsContent value="match" className="space-y-4 mt-4">
             <div className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">选择招标项目进行匹配</Label>
-                <Select value={selectedBidId} onValueChange={setSelectedBidId}>
-                  <SelectTrigger><SelectValue placeholder="选择已解析的招标项目" /></SelectTrigger>
-                  <SelectContent>
-                    {bidAnalyses.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>{b.project_name || "未命名"}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">选择招标项目</Label>
+                  <Select value={selectedBidId} onValueChange={(val) => { setSelectedBidId(val); setSelectedRole(""); }}>
+                    <SelectTrigger><SelectValue placeholder="选择已解析的招标项目" /></SelectTrigger>
+                    <SelectContent>
+                      {bidAnalyses.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>{b.project_name || "未命名"}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">目标岗位角色</Label>
+                  <Select value={selectedRole} onValueChange={setSelectedRole} disabled={!selectedBidId || bidRoles.length === 0}>
+                    <SelectTrigger><SelectValue placeholder={bidRoles.length > 0 ? "选择岗位" : "请先选择招标项目"} /></SelectTrigger>
+                    <SelectContent>
+                      {bidRoles.map((r: any, i: number) => (
+                        <SelectItem key={i} value={r.role}>
+                          {r.role}{r.count ? ` (${r.count}人)` : ""}{r.experience_years ? ` · ${r.experience_years}年+` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs flex items-center gap-2">
@@ -400,6 +436,9 @@ export default function ResumeFactory() {
                       {v.match_score}%
                     </div>
                     <div className="flex-1">
+                      {v.match_details.target_role && (
+                        <p className="text-sm">目标岗位: <span className="text-foreground font-semibold">{v.match_details.target_role}</span></p>
+                      )}
                       {v.match_details.suggested_role && (
                         <p className="text-sm">建议角色: <span className="text-foreground font-semibold">{v.match_details.suggested_role}</span></p>
                       )}
@@ -408,6 +447,14 @@ export default function ResumeFactory() {
                       )}
                     </div>
                   </div>
+
+                  {/* Role requirements analysis */}
+                  {v.match_details.role_requirements_met && (
+                    <div className="p-3 bg-muted/30 rounded-lg">
+                      <h4 className="text-sm font-semibold text-foreground mb-1">🎯 岗位要求逐条分析</h4>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{v.match_details.role_requirements_met}</p>
+                    </div>
+                  )}
 
                   {/* Strengths */}
                   {v.match_details.strengths?.length > 0 && (
@@ -503,20 +550,39 @@ export default function ResumeFactory() {
           {/* Polish */}
           <TabsContent value="polish" className="space-y-4 mt-4">
             <div className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">关联招标项目（选择后自动生成润色要求）</Label>
-                <Select value={selectedBidId} onValueChange={(val) => {
-                  setSelectedBidId(val);
-                  generatePolishInstructions(val);
-                }}>
-                  <SelectTrigger><SelectValue placeholder="选择招标项目" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">不关联</SelectItem>
-                    {bidAnalyses.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>{b.project_name || "未命名"}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">关联招标项目</Label>
+                  <Select value={selectedBidId} onValueChange={(val) => {
+                    setSelectedBidId(val);
+                    setSelectedRole("");
+                    generatePolishInstructions(val);
+                  }}>
+                    <SelectTrigger><SelectValue placeholder="选择招标项目" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">不关联</SelectItem>
+                      {bidAnalyses.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>{b.project_name || "未命名"}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">目标岗位角色</Label>
+                  <Select value={selectedRole} onValueChange={(val) => {
+                    setSelectedRole(val);
+                    if (selectedBidId && selectedBidId !== "none") generatePolishInstructions(selectedBidId, val);
+                  }} disabled={!selectedBidId || selectedBidId === "none" || bidRoles.length === 0}>
+                    <SelectTrigger><SelectValue placeholder={bidRoles.length > 0 ? "选择岗位" : "请先选择项目"} /></SelectTrigger>
+                    <SelectContent>
+                      {bidRoles.map((r: any, i: number) => (
+                        <SelectItem key={i} value={r.role}>
+                          {r.role}{r.count ? ` (${r.count}人)` : ""}{r.experience_years ? ` · ${r.experience_years}年+` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs flex items-center gap-2">
