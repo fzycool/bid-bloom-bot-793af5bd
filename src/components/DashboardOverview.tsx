@@ -213,7 +213,7 @@ export default function DashboardOverview() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <FileSearch className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span className="text-sm text-foreground truncate max-w-[200px]">{a.project_name || "未命名"}</span>
+                      <span className="text-sm text-foreground">{a.project_name || "未命名"}</span>
                     </div>
                     <div className="flex items-center gap-3">
                       {a.risk_score !== null && (
