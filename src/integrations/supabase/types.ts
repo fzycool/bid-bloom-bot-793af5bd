@@ -72,12 +72,14 @@ export type Database = {
           business_keywords: Json | null
           created_at: string
           custom_prompt: string | null
+          deposit_amount: string | null
           disqualification_items: Json | null
           document_id: string | null
           file_path: string | null
           id: string
           personnel_requirements: Json | null
           project_name: string | null
+          requires_presentation: boolean | null
           responsibility_keywords: Json | null
           risk_score: number | null
           scoring_table: Json | null
@@ -94,12 +96,14 @@ export type Database = {
           business_keywords?: Json | null
           created_at?: string
           custom_prompt?: string | null
+          deposit_amount?: string | null
           disqualification_items?: Json | null
           document_id?: string | null
           file_path?: string | null
           id?: string
           personnel_requirements?: Json | null
           project_name?: string | null
+          requires_presentation?: boolean | null
           responsibility_keywords?: Json | null
           risk_score?: number | null
           scoring_table?: Json | null
@@ -116,12 +120,14 @@ export type Database = {
           business_keywords?: Json | null
           created_at?: string
           custom_prompt?: string | null
+          deposit_amount?: string | null
           disqualification_items?: Json | null
           document_id?: string | null
           file_path?: string | null
           id?: string
           personnel_requirements?: Json | null
           project_name?: string | null
+          requires_presentation?: boolean | null
           responsibility_keywords?: Json | null
           risk_score?: number | null
           scoring_table?: Json | null

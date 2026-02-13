@@ -43,6 +43,8 @@ interface BidAnalysis {
   file_path: string | null;
   bid_deadline: string | null;
   bid_location: string | null;
+  requires_presentation: boolean | null;
+  deposit_amount: string | null;
 }
 
 export default function BidParser() {
@@ -302,7 +304,43 @@ export default function BidParser() {
           </Card>
         )}
 
-        {/* Editable prompt */}
+        {/* Basic info card */}
+        {(a.bid_deadline || a.bid_location || a.requires_presentation !== null || a.deposit_amount) && (
+          <Card className="border-2 border-accent/30">
+            <CardContent className="p-5">
+              <h3 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">📋 招标基本信息</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">投标截止时间</div>
+                  <div className={`text-sm font-bold ${a.bid_deadline ? "text-red-600" : "text-muted-foreground"}`}>
+                    {a.bid_deadline
+                      ? new Date(a.bid_deadline).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                      : "未识别"}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">投标地点</div>
+                  <div className={`text-sm font-bold ${a.bid_location ? "text-blue-600" : "text-muted-foreground"}`}>
+                    {a.bid_location || "未识别"}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">是否讲标</div>
+                  <div className={`text-sm font-bold ${a.requires_presentation === true ? "text-orange-600" : a.requires_presentation === false ? "text-green-600" : "text-muted-foreground"}`}>
+                    {a.requires_presentation === true ? "✅ 需要讲标" : a.requires_presentation === false ? "❌ 无需讲标" : "未识别"}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">投标保证金</div>
+                  <div className={`text-sm font-bold ${a.deposit_amount ? "text-amber-600" : "text-muted-foreground"}`}>
+                    {a.deposit_amount || "未识别"}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
