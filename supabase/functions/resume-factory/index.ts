@@ -416,6 +416,152 @@ ${resume.content || "无"}
       });
     }
 
+    // ---- ACTION: batch-import-excel (one Excel, multiple sheets = multiple people) ----
+    if (action === "batch-import-excel") {
+      const { filePath, userId } = params;
+      if (!filePath || !userId) throw new Error("缺少参数");
+
+      const { data: fileData, error: dlError } = await supabase.storage
+        .from("knowledge-base")
+        .download(filePath);
+      if (dlError || !fileData) throw new Error(`文件下载失败: ${dlError?.message || "unknown"}`);
+
+      const arrayBuffer = await fileData.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+      }
+      const b64 = btoa(binary);
+      const mimeType = filePath.endsWith(".xlsx")
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "application/vnd.ms-excel";
+
+      // Step 1: Ask Gemini to extract all sheets as structured JSON array
+      const extractResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            {
+              role: "system",
+              content: `你是简历解析专家。这个Excel文件包含多个Sheet，每个Sheet是一个人的简历。
+请提取每个Sheet的信息，返回JSON数组格式：
+[
+  {
+    "sheet_name": "Sheet名称",
+    "name": "姓名",
+    "gender": "性别",
+    "birth_year": 出生年份(数字或null),
+    "education": "最高学历",
+    "major": "专业",
+    "current_company": "当前单位",
+    "current_position": "当前职位",
+    "years_of_experience": 工作年限(数字或null),
+    "certifications": ["证书1"],
+    "skills": ["技能1"],
+    "resume_text": "该Sheet的完整简历文本内容",
+    "work_experiences": [
+      {"company": "公司", "position": "职位", "start_date": "2020-01", "end_date": "2023-06", "description": "职责描述", "is_current": false}
+    ],
+    "project_experiences": [
+      {"project_name": "项目名", "role": "角色", "start_date": "2021-03", "end_date": "2022-01", "description": "项目描述", "technologies": ["技术1"]}
+    ],
+    "education_history": [
+      {"school": "学校", "degree": "学历", "major": "专业", "start_date": "2012-09", "end_date": "2016-06"}
+    ],
+    "timeline_issues": [
+      {"type": "overlap|gap|impossible", "description": "问题描述", "severity": "error|warning"}
+    ]
+  }
+]
+
+如果某个Sheet不是简历（如目录、说明页），请跳过。
+请严格输出纯JSON数组，不要包含markdown标记。`,
+            },
+            {
+              role: "user",
+              content: [
+                { type: "file", file: { filename: `resumes.${filePath.endsWith(".xlsx") ? "xlsx" : "xls"}`, file_data: `data:${mimeType};base64,${b64}` } },
+                { type: "text", text: "请解析这个Excel中所有Sheet的简历信息。" },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!extractResponse.ok) throw new Error(`AI解析失败: ${extractResponse.status}`);
+      const extractData = await extractResponse.json();
+      let resultText = extractData.choices?.[0]?.message?.content || "";
+      resultText = resultText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+      let people: any[];
+      try {
+        people = JSON.parse(resultText);
+      } catch {
+        console.error("Failed to parse batch result:", resultText);
+        throw new Error("AI返回格式异常，无法解析");
+      }
+
+      if (!Array.isArray(people) || people.length === 0) {
+        throw new Error("未在Excel中识别到有效简历");
+      }
+
+      // Step 2: Create employees and resume versions
+      const created: any[] = [];
+      for (const person of people) {
+        if (!person.name) continue;
+
+        // Create employee
+        const { data: emp, error: empErr } = await supabase
+          .from("employees")
+          .insert({
+            user_id: userId,
+            name: person.name,
+            gender: person.gender || null,
+            birth_year: person.birth_year || null,
+            education: person.education || null,
+            major: person.major || null,
+            current_company: person.current_company || null,
+            current_position: person.current_position || null,
+            years_of_experience: person.years_of_experience || null,
+            certifications: person.certifications || [],
+            skills: person.skills || [],
+          })
+          .select()
+          .single();
+
+        if (empErr || !emp) {
+          console.error("Create employee failed:", empErr);
+          continue;
+        }
+
+        // Create resume version
+        const { data: rv, error: rvErr } = await supabase
+          .from("resume_versions")
+          .insert({
+            employee_id: emp.id,
+            user_id: userId,
+            version_name: "导入版",
+            content: person.resume_text || "",
+            work_experiences: person.work_experiences || [],
+            project_experiences: person.project_experiences || [],
+            education_history: person.education_history || [],
+            timeline_issues: person.timeline_issues || [],
+            ai_status: "completed",
+          })
+          .select()
+          .single();
+
+        created.push({ employee: emp, resumeVersion: rv });
+      }
+
+      return new Response(JSON.stringify({ success: true, count: created.length, created }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     throw new Error(`Unknown action: ${action}`);
   } catch (e) {
     console.error("resume-factory error:", e);

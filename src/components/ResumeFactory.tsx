@@ -25,6 +25,7 @@ import {
   Trash2,
   ChevronLeft,
   Copy,
+  FileSpreadsheet,
 } from "lucide-react";
 
 interface Employee {
@@ -90,6 +91,7 @@ export default function ResumeFactory() {
   const [resumeContent, setResumeContent] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
+  const [batchImporting, setBatchImporting] = useState(false);
 
   // Match/polish
   const [selectedBidId, setSelectedBidId] = useState<string>("");
@@ -261,6 +263,28 @@ export default function ResumeFactory() {
   const handleCopyPolished = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "已复制到剪贴板" });
+  };
+
+  const handleBatchImportExcel = async (file: File) => {
+    if (!user) return;
+    setBatchImporting(true);
+    try {
+      const fileExt = file.name.split('.').pop() || 'xlsx';
+      const storagePath = `${user.id}/batch-import/${Date.now()}.${fileExt}`;
+      const { error: uploadErr } = await supabase.storage.from("knowledge-base").upload(storagePath, file);
+      if (uploadErr) throw uploadErr;
+
+      const { data, error } = await supabase.functions.invoke("resume-factory", {
+        body: { action: "batch-import-excel", filePath: storagePath, userId: user.id },
+      });
+      if (error) throw error;
+
+      toast({ title: "批量导入成功", description: `已导入 ${data.count} 名员工` });
+      await fetchData();
+    } catch (err: any) {
+      toast({ title: "导入失败", description: err.message, variant: "destructive" });
+    }
+    setBatchImporting(false);
   };
 
   const generatePolishInstructions = useCallback((bidId: string, role?: string) => {
@@ -783,15 +807,24 @@ export default function ResumeFactory() {
         <div>
           <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <Users className="w-6 h-6 text-accent" />
-            简历智能工场
+            简历工厂
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
             多版本简历管理、招标匹配分析、智能润色与时间线稽查
           </p>
         </div>
-        <Button onClick={() => setShowAddEmployee(true)} className="gap-1.5">
-          <Plus className="w-4 h-4" /> 添加员工
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowAddEmployee(true)} className="gap-1.5">
+            <Plus className="w-4 h-4" /> 添加员工
+          </Button>
+          <Button variant="outline" className="gap-1.5" disabled={batchImporting}
+            onClick={() => document.getElementById("batch-excel-import")?.click()}>
+            {batchImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            {batchImporting ? "导入中..." : "Excel批量导入"}
+          </Button>
+          <input type="file" id="batch-excel-import" className="hidden" accept=".xls,.xlsx"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleBatchImportExcel(f); e.target.value = ""; }} />
+        </div>
       </div>
 
       {/* Add employee dialog */}
