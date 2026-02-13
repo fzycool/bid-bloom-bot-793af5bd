@@ -19,7 +19,7 @@ import HolographicAudit from "@/components/HolographicAudit";
 const modules = [
   { id: "knowledge", label: "知识库", icon: BookOpen },
   { id: "parse", label: "招标解析", icon: FileSearch },
-  { id: "resume", label: "简历工场", icon: Users },
+  { id: "resume", label: "简历工厂", icon: Users },
   { id: "bid", label: "投标助手", icon: ClipboardCheck },
   { id: "audit", label: "全息审查", icon: CheckCircle },
 ];
