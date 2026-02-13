@@ -22,8 +22,62 @@ serve(async (req) => {
 
     // ---- ACTION: parse-resume (extract structured data from resume text) ----
     if (action === "parse-resume") {
-      const { resumeVersionId, content } = params;
-      if (!content?.trim()) throw new Error("简历内容不能为空");
+      const { resumeVersionId, content, filePath, fileType } = params;
+
+      let resumeText = content?.trim() || "";
+
+      // If file path provided, download and extract text
+      if (filePath && !resumeText) {
+        const { data: fileData, error: dlError } = await supabase.storage
+          .from("knowledge-base")
+          .download(filePath);
+        if (dlError || !fileData) throw new Error(`文件下载失败: ${dlError?.message || "unknown"}`);
+
+        const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
+        if (isPdf) {
+          // For PDF, we'll send as base64 to Gemini which can read PDFs natively
+          const arrayBuffer = await fileData.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          // Use Deno's built-in btoa for base64
+          let binary = "";
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+          const b64 = btoa(binary);
+
+          await supabase.from("resume_versions").update({ ai_status: "processing" }).eq("id", resumeVersionId);
+
+          const pdfResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "google/gemini-2.5-flash",
+              messages: [
+                {
+                  role: "system",
+                  content: "请从上传的PDF简历中提取全部文本内容，保留原始格式和结构。只输出提取的文本，不要添加额外说明。",
+                },
+                {
+                  role: "user",
+                  content: [
+                    { type: "file", file: { filename: "resume.pdf", file_data: `data:application/pdf;base64,${b64}` } },
+                    { type: "text", text: "请提取这份PDF简历的全部文本内容。" },
+                  ],
+                },
+              ],
+            }),
+          });
+
+          if (!pdfResponse.ok) throw new Error(`PDF提取失败: ${pdfResponse.status}`);
+          const pdfData = await pdfResponse.json();
+          resumeText = pdfData.choices?.[0]?.message?.content || "";
+        } else {
+          // Word/txt: extract text directly
+          resumeText = await fileData.text();
+        }
+      }
+
+      if (!resumeText) throw new Error("简历内容不能为空");
 
       await supabase.from("resume_versions").update({ ai_status: "processing" }).eq("id", resumeVersionId);
 

@@ -147,6 +147,7 @@ export default function ResumeFactory() {
     setProcessing(true);
 
     let textContent = resumeContent;
+    let filePath: string | undefined;
 
     // Upload file if in file mode
     if (inputMode === "file" && resumeFile) {
@@ -157,8 +158,8 @@ export default function ResumeFactory() {
         toast({ title: "上传失败", description: uploadErr.message, variant: "destructive" });
         setProcessing(false); return;
       }
-      // For file mode, use file content as text
-      textContent = await resumeFile.text();
+      filePath = storagePath;
+      textContent = ""; // will be extracted by edge function
     }
 
     // Create version record
@@ -181,7 +182,7 @@ export default function ResumeFactory() {
     // Call AI to parse
     try {
       const { error: fnErr } = await supabase.functions.invoke("resume-factory", {
-        body: { action: "parse-resume", resumeVersionId: version.id, content: textContent },
+        body: { action: "parse-resume", resumeVersionId: version.id, content: textContent || undefined, filePath, fileType: resumeFile?.type },
       });
       if (fnErr) throw fnErr;
       toast({ title: "简历已解析", description: "AI已完成结构化提取和时间线稽查" });
