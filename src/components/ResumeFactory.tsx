@@ -277,7 +277,11 @@ export default function ResumeFactory() {
       for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName];
         const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
-        if (csv.trim()) sheetsText.push({ name: sheetName, text: csv });
+        if (csv.trim()) {
+          // Truncate each sheet to max 8000 chars to avoid payload size issues
+          const trimmed = csv.length > 8000 ? csv.slice(0, 8000) : csv;
+          sheetsText.push({ name: sheetName, text: trimmed });
+        }
       }
       if (sheetsText.length === 0) {
         toast({ title: "Excel中没有有效内容", variant: "destructive" });
@@ -285,12 +289,19 @@ export default function ResumeFactory() {
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke("resume-factory", {
-        body: { action: "batch-import-excel", sheetsText, userId: user.id },
-      });
-      if (error) throw error;
+      // Process in batches of 5 sheets to avoid payload size limits
+      const BATCH_SIZE = 5;
+      let totalCount = 0;
+      for (let i = 0; i < sheetsText.length; i += BATCH_SIZE) {
+        const batch = sheetsText.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase.functions.invoke("resume-factory", {
+          body: { action: "batch-import-excel", sheetsText: batch, userId: user.id },
+        });
+        if (error) throw error;
+        totalCount += data.count || 0;
+      }
 
-      toast({ title: "批量导入成功", description: `已导入 ${data.count} 名员工` });
+      toast({ title: "批量导入成功", description: `已导入 ${totalCount} 名员工` });
       await fetchData();
     } catch (err: any) {
       toast({ title: "导入失败", description: err.message, variant: "destructive" });
