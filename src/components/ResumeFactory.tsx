@@ -64,6 +64,10 @@ interface BidAnalysis {
   id: string;
   project_name: string | null;
   ai_status: string;
+  technical_keywords: string[] | null;
+  business_keywords: string[] | null;
+  responsibility_keywords: string[] | null;
+  personnel_requirements: any[] | null;
 }
 
 export default function ResumeFactory() {
@@ -98,7 +102,7 @@ export default function ResumeFactory() {
     if (!user) return;
     const [empRes, bidRes] = await Promise.all([
       supabase.from("employees").select("*").order("created_at", { ascending: false }),
-      supabase.from("bid_analyses").select("id, project_name, ai_status").eq("ai_status", "completed").order("created_at", { ascending: false }),
+      supabase.from("bid_analyses").select("id, project_name, ai_status, technical_keywords, business_keywords, responsibility_keywords, personnel_requirements").eq("ai_status", "completed").order("created_at", { ascending: false }),
     ]);
     setEmployees((empRes.data as Employee[]) || []);
     setBidAnalyses((bidRes.data as BidAnalysis[]) || []);
@@ -466,9 +470,41 @@ export default function ResumeFactory() {
           <TabsContent value="polish" className="space-y-4 mt-4">
             <div className="space-y-3">
               <div className="space-y-1">
-                <Label className="text-xs">关联招标项目（可选，用于关键词对齐）</Label>
-                <Select value={selectedBidId} onValueChange={setSelectedBidId}>
-                  <SelectTrigger><SelectValue placeholder="不关联招标项目" /></SelectTrigger>
+                <Label className="text-xs">关联招标项目（选择后自动生成润色要求）</Label>
+                <Select value={selectedBidId} onValueChange={(val) => {
+                  setSelectedBidId(val);
+                  // Auto-generate polish instructions from bid keywords + resume
+                  if (val && val !== "none") {
+                    const bid = bidAnalyses.find((b) => b.id === val);
+                    if (bid) {
+                      const empSkills = selectedEmployee?.skills || [];
+                      const empCerts = selectedEmployee?.certifications || [];
+                      const techKws = (bid.technical_keywords || []) as string[];
+                      const bizKws = (bid.business_keywords || []) as string[];
+                      const respKws = (bid.responsibility_keywords || []) as string[];
+                      const allBidKws = [...techKws, ...bizKws, ...respKws];
+                      const matched = allBidKws.filter((k) => empSkills.some((s) => k.includes(s) || s.includes(k)));
+                      const missing = allBidKws.filter((k) => !empSkills.some((s) => k.includes(s) || s.includes(k)));
+
+                      let instructions = `【招标关键词与简历对照】\n`;
+                      if (matched.length > 0) instructions += `✅ 已有匹配（需重点强化）：${matched.join("、")}\n`;
+                      if (missing.length > 0) instructions += `⚠️ 缺失关键词（需从经历中挖掘关联）：${missing.join("、")}\n`;
+                      if (empCerts.length > 0) instructions += `📜 现有证书：${empCerts.join("、")}\n`;
+
+                      const roles = (bid.personnel_requirements || []) as any[];
+                      if (roles.length > 0) {
+                        instructions += `\n【招标人员要求】\n`;
+                        roles.forEach((r: any) => {
+                          instructions += `• ${r.role}${r.count ? `(${r.count}人)` : ""}: ${r.qualifications || ""}${r.certifications?.length ? `, 证书:${r.certifications.join("/")}` : ""}${r.experience_years ? `, ${r.experience_years}年+` : ""}\n`;
+                        });
+                      }
+
+                      instructions += `\n【润色要求】\n1. 将简历中的职责描述对齐到招标评分关键词\n2. 对已有匹配技能进行量化强化（加入具体数据和成果）\n3. 对缺失关键词从现有经历中挖掘关联描述\n4. 保持时间线不变，不编造经历`;
+                      setPolishInstructions(instructions);
+                    }
+                  }
+                }}>
+                  <SelectTrigger><SelectValue placeholder="选择招标项目" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">不关联</SelectItem>
                     {bidAnalyses.map((b) => (
@@ -478,12 +514,15 @@ export default function ResumeFactory() {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">自定义润色要求（可选）</Label>
+                <Label className="text-xs flex items-center gap-2">
+                  📝 润色要求
+                  <span className="text-muted-foreground font-normal">（选择招标项目后自动生成，可自由编辑）</span>
+                </Label>
                 <Textarea
-                  placeholder="例如：突出项目管理能力、强调云计算经验、增加政务项目描述..."
+                  placeholder="选择招标项目后会自动生成关键词对照和润色要求，也可手动输入..."
                   value={polishInstructions}
                   onChange={(e) => setPolishInstructions(e.target.value)}
-                  className="min-h-[80px]"
+                  className="min-h-[200px] text-sm"
                 />
               </div>
               <Button onClick={() => handlePolish(v.id)} disabled={processing} className="gap-1.5">
