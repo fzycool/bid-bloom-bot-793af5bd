@@ -24,7 +24,7 @@ interface Stats {
   audits: number;
   highRiskAnalyses: number;
   avgRiskScore: number | null;
-  recentAnalyses: { id: string; project_name: string | null; risk_score: number | null; created_at: string }[];
+  recentAnalyses: { id: string; project_name: string | null; risk_score: number | null; created_at: string; bid_deadline: string | null; bid_location: string | null }[];
   pendingUsers?: number;
   totalUsers?: number;
 }
@@ -39,7 +39,7 @@ export default function DashboardOverview() {
     const fetchStats = async () => {
       const [docRes, anaRes, empRes, rvRes, propRes, auditRes] = await Promise.all([
         supabase.from("documents").select("id", { count: "exact", head: true }),
-        supabase.from("bid_analyses").select("id, project_name, risk_score, created_at").order("created_at", { ascending: false }).limit(100),
+        supabase.from("bid_analyses").select("id, project_name, risk_score, created_at, bid_deadline, bid_location").order("created_at", { ascending: false }).limit(100),
         supabase.from("employees").select("id", { count: "exact", head: true }),
         supabase.from("resume_versions").select("id", { count: "exact", head: true }),
         supabase.from("bid_proposals").select("id", { count: "exact", head: true }),
@@ -209,18 +209,32 @@ export default function DashboardOverview() {
             </div>
             <div className="space-y-2">
               {stats.recentAnalyses.map((a) => (
-                <div key={a.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                  <div className="flex items-center gap-2">
-                    <FileSearch className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-sm text-foreground truncate max-w-[200px]">{a.project_name || "未命名"}</span>
+                <div key={a.id} className="flex flex-col gap-1 py-3 border-b border-border last:border-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FileSearch className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-sm text-foreground truncate max-w-[200px]">{a.project_name || "未命名"}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {a.risk_score !== null && (
+                        <span className={`text-sm font-bold ${riskColor(a.risk_score)}`}>{a.risk_score}分</span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(a.created_at).toLocaleDateString("zh-CN")}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {a.risk_score !== null && (
-                      <span className={`text-sm font-bold ${riskColor(a.risk_score)}`}>{a.risk_score}分</span>
+                  <div className="flex items-center gap-2 ml-5.5 flex-wrap">
+                    {a.bid_deadline && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold text-xs">
+                        📅 {new Date(a.bid_deadline).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </span>
                     )}
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(a.created_at).toLocaleDateString("zh-CN")}
-                    </span>
+                    {a.bid_location && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold text-xs">
+                        📍 {a.bid_location}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

@@ -67,6 +67,8 @@ export type Database = {
       bid_analyses: {
         Row: {
           ai_status: string
+          bid_deadline: string | null
+          bid_location: string | null
           business_keywords: Json | null
           created_at: string
           custom_prompt: string | null
@@ -87,6 +89,8 @@ export type Database = {
         }
         Insert: {
           ai_status?: string
+          bid_deadline?: string | null
+          bid_location?: string | null
           business_keywords?: Json | null
           created_at?: string
           custom_prompt?: string | null
@@ -107,6 +111,8 @@ export type Database = {
         }
         Update: {
           ai_status?: string
+          bid_deadline?: string | null
+          bid_location?: string | null
           business_keywords?: Json | null
           created_at?: string
           custom_prompt?: string | null

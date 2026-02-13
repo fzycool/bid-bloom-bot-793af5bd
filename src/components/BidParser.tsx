@@ -41,6 +41,8 @@ interface BidAnalysis {
   custom_prompt: string | null;
   document_id: string | null;
   file_path: string | null;
+  bid_deadline: string | null;
+  bid_location: string | null;
 }
 
 export default function BidParser() {
@@ -271,6 +273,18 @@ export default function BidParser() {
             <p className="text-sm text-muted-foreground">
               解析于 {new Date(a.created_at).toLocaleString("zh-CN")}
             </p>
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              {a.bid_deadline && (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-red-100 text-red-700 font-bold text-sm">
+                  📅 投标截止: {new Date(a.bid_deadline).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+              {a.bid_location && (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-blue-100 text-blue-700 font-bold text-sm">
+                  📍 {a.bid_location}
+                </span>
+              )}
+            </div>
           </div>
           {a.risk_score !== null && (
             <div className="text-center">
@@ -720,8 +734,18 @@ export default function BidParser() {
                         <Badge variant="destructive">解析失败</Badge>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
                       <span>{new Date(a.created_at).toLocaleString("zh-CN")}</span>
+                      {a.bid_deadline && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold text-xs">
+                          📅 投标截止: {new Date(a.bid_deadline).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                      {a.bid_location && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold text-xs">
+                          📍 {a.bid_location}
+                        </span>
+                      )}
                       {a.ai_status === "completed" && (
                         <>
                           <span>废标项: {(a.disqualification_items as any[])?.length || 0}</span>
