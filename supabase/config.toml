@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.parse-bid]
 verify_jwt = false
+
+[functions.bidding-assistant]
+verify_jwt = false
+
+[functions.resume-factory]
+verify_jwt = false

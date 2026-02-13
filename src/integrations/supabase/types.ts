@@ -85,6 +85,53 @@ export type Database = {
           },
         ]
       }
+      bid_proposals: {
+        Row: {
+          ai_status: string
+          bid_analysis_id: string | null
+          created_at: string
+          custom_prompt: string | null
+          id: string
+          outline_content: string | null
+          project_name: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_status?: string
+          bid_analysis_id?: string | null
+          created_at?: string
+          custom_prompt?: string | null
+          id?: string
+          outline_content?: string | null
+          project_name?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_status?: string
+          bid_analysis_id?: string | null
+          created_at?: string
+          custom_prompt?: string | null
+          id?: string
+          outline_content?: string | null
+          project_name?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bid_proposals_bid_analysis_id_fkey"
+            columns: ["bid_analysis_id"]
+            isOneToOne: false
+            referencedRelation: "bid_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       documents: {
         Row: {
           ai_metadata: Json | null
@@ -231,6 +278,123 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      proposal_materials: {
+        Row: {
+          created_at: string
+          id: string
+          matched_document_id: string | null
+          matched_file_path: string | null
+          material_name: string | null
+          notes: string | null
+          proposal_id: string
+          requirement_text: string
+          requirement_type: string
+          severity: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          matched_document_id?: string | null
+          matched_file_path?: string | null
+          material_name?: string | null
+          notes?: string | null
+          proposal_id: string
+          requirement_text: string
+          requirement_type?: string
+          severity?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          matched_document_id?: string | null
+          matched_file_path?: string | null
+          material_name?: string | null
+          notes?: string | null
+          proposal_id?: string
+          requirement_text?: string
+          requirement_type?: string
+          severity?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposal_materials_matched_document_id_fkey"
+            columns: ["matched_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_materials_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "bid_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      proposal_sections: {
+        Row: {
+          content: string | null
+          created_at: string
+          id: string
+          parent_id: string | null
+          proposal_id: string
+          section_number: string | null
+          sort_order: number
+          source_id: string | null
+          source_type: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          proposal_id: string
+          section_number?: string | null
+          sort_order?: number
+          source_id?: string | null
+          source_type?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          proposal_id?: string
+          section_number?: string | null
+          sort_order?: number
+          source_id?: string | null
+          source_type?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposal_sections_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "proposal_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_sections_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "bid_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       resume_versions: {
         Row: {

@@ -13,6 +13,7 @@ import {
 import KnowledgeBase from "@/components/KnowledgeBase";
 import BidParser from "@/components/BidParser";
 import ResumeFactory from "@/components/ResumeFactory";
+import BiddingAssistant from "@/components/BiddingAssistant";
 
 const modules = [
   { id: "knowledge", label: "知识库", icon: BookOpen },
@@ -86,13 +87,7 @@ const Dashboard = () => {
           {activeModule === "knowledge" && <KnowledgeBase />}
           {activeModule === "parse" && <BidParser />}
           {activeModule === "resume" && <ResumeFactory />}
-          {activeModule === "bid" && (
-            <div className="text-muted-foreground text-center py-20">
-              <ClipboardCheck className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">智能投标助手</p>
-              <p className="text-sm">即将上线</p>
-            </div>
-          )}
+          {activeModule === "bid" && <BiddingAssistant />}
           {activeModule === "audit" && (
             <div className="text-muted-foreground text-center py-20">
               <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
