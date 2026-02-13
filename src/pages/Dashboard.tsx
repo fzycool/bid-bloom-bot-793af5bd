@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import DashboardOverview from "@/components/DashboardOverview";
 import {
   Shield,
   LogOut,
@@ -11,6 +12,7 @@ import {
   CheckCircle,
   UserCog,
   Clock,
+  LayoutDashboard,
 } from "lucide-react";
 import KnowledgeBase from "@/components/KnowledgeBase";
 import BidParser from "@/components/BidParser";
@@ -20,6 +22,7 @@ import HolographicAudit from "@/components/HolographicAudit";
 import UserManagement from "@/components/UserManagement";
 
 const baseModules = [
+  { id: "overview", label: "数据看板", icon: LayoutDashboard },
   { id: "knowledge", label: "知识库", icon: BookOpen },
   { id: "parse", label: "招标解析", icon: FileSearch },
   { id: "resume", label: "简历工厂", icon: Users },
@@ -29,7 +32,7 @@ const baseModules = [
 
 const Dashboard = () => {
   const { user, isApproved, isAdmin, signOut } = useAuth();
-  const [activeModule, setActiveModule] = useState("knowledge");
+  const [activeModule, setActiveModule] = useState("overview");
 
   const modules = [
     ...baseModules,
@@ -119,6 +122,7 @@ const Dashboard = () => {
 
         {/* Main content */}
         <main className="flex-1 overflow-auto p-6 md:p-8">
+          {activeModule === "overview" && <DashboardOverview />}
           {activeModule === "knowledge" && <KnowledgeBase />}
           {activeModule === "parse" && <BidParser />}
           {activeModule === "resume" && <ResumeFactory />}
