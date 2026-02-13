@@ -143,7 +143,7 @@ const Index = () => {
 
         <div className="relative z-10">
           <p className="text-primary-foreground/40 text-xs">
-            润和捷科AI智标工厂 由 AI代码开发
+            润和捷科AI智标工厂 由 AI代码开发 润和AI中心
           </p>
         </div>
       </div>
