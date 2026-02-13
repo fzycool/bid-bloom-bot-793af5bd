@@ -54,7 +54,7 @@ export default function BidParser() {
   const [customPrompt, setCustomPrompt] = useState(
     "1. 评分标准表（分类、权重、评分细则、佐证材料）\n2. 废标项（★标记、否决投标条款）\n3. 陷阱项（容易忽略的失分条款）\n4. 人员配置要求（角色、数量、资质、证书）\n5. 专业技能/业务技能/职责关键词\n6. 风险评分与总体分析"
   );
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [inputMode, setInputMode] = useState<"file" | "text">("file");
   const [selectedAnalysis, setSelectedAnalysis] = useState<BidAnalysis | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -78,74 +78,112 @@ export default function BidParser() {
       toast({ title: "请粘贴招标文件内容", variant: "destructive" });
       return;
     }
-    if (inputMode === "file" && !uploadedFile) {
+    if (inputMode === "file" && uploadedFiles.length === 0) {
       toast({ title: "请上传招标文件", variant: "destructive" });
       return;
     }
     if (!user) return;
 
     setAnalyzing(true);
-    let filePath: string | undefined;
 
-    // Upload file to storage if in file mode
-    if (inputMode === "file" && uploadedFile) {
-      const fileExt = uploadedFile.name.split('.').pop() || 'bin';
-      const safeFileName = `${Date.now()}.${fileExt}`;
-      const storagePath = `${user.id}/${safeFileName}`;
-      const { error: uploadErr } = await supabase.storage
-        .from("knowledge-base")
-        .upload(storagePath, uploadedFile);
-      if (uploadErr) {
-        toast({ title: "文件上传失败", description: uploadErr.message, variant: "destructive" });
-        setAnalyzing(false);
-        return;
+    if (inputMode === "file") {
+      // Process multiple files
+      let lastAnalysis: any = null;
+      for (const file of uploadedFiles) {
+        const fileExt = file.name.split('.').pop() || 'bin';
+        const safeFileName = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${fileExt}`;
+        const storagePath = `${user.id}/${safeFileName}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("knowledge-base")
+          .upload(storagePath, file);
+        if (uploadErr) {
+          toast({ title: `${file.name} 上传失败`, description: uploadErr.message, variant: "destructive" });
+          continue;
+        }
+
+        const name = projectName || file.name.replace(/\.(pdf|docx?|txt)$/i, "");
+        const { data: analysis, error: insertErr } = await supabase
+          .from("bid_analyses")
+          .insert({ user_id: user.id, project_name: name, custom_prompt: customPrompt.trim() || null, file_path: storagePath } as any)
+          .select()
+          .single();
+
+        if (insertErr || !analysis) {
+          toast({ title: `${file.name} 创建失败`, description: insertErr?.message, variant: "destructive" });
+          continue;
+        }
+
+        try {
+          const { error: fnErr } = await supabase.functions.invoke("parse-bid", {
+            body: {
+              analysisId: analysis.id,
+              projectName: name,
+              customPrompt: customPrompt.trim() || undefined,
+              filePath: storagePath,
+              fileType: file.type || "",
+            },
+          });
+          if (fnErr) throw fnErr;
+          lastAnalysis = analysis;
+        } catch (err: any) {
+          toast({ title: `${file.name} 解析失败`, description: err.message, variant: "destructive" });
+        }
       }
-      filePath = storagePath;
-    }
 
-    const { data: analysis, error: insertErr } = await supabase
-      .from("bid_analyses")
-      .insert({ user_id: user.id, project_name: projectName || uploadedFile?.name || "未命名项目", custom_prompt: customPrompt.trim() || null, file_path: filePath || null } as any)
-      .select()
-      .single();
-
-    if (insertErr || !analysis) {
-      toast({ title: "创建失败", description: insertErr?.message, variant: "destructive" });
-      setAnalyzing(false);
-      return;
-    }
-
-    try {
-      const body: any = {
-        analysisId: analysis.id,
-        projectName: projectName || uploadedFile?.name || "未命名项目",
-        customPrompt: customPrompt.trim() || undefined,
-      };
-      if (filePath) {
-        body.filePath = filePath;
-        body.fileType = uploadedFile?.type || "";
-      } else {
-        body.content = content.substring(0, 30000);
-      }
-
-      const { error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
-      if (fnErr) throw fnErr;
-
-      toast({ title: "解析完成", description: "招标文件已完成智能解析" });
-      setContent("");
+      toast({ title: "批量解析完成", description: `已处理 ${uploadedFiles.length} 个文件` });
+      setUploadedFiles([]);
       setProjectName("");
-      setUploadedFile(null);
       setShowForm(false);
       await fetchAnalyses();
 
-      const { data: updated } = await supabase
+      if (lastAnalysis) {
+        const { data: updated } = await supabase
+          .from("bid_analyses")
+          .select("*")
+          .eq("id", lastAnalysis.id)
+          .single();
+        if (updated) setSelectedAnalysis(updated as BidAnalysis);
+      }
+    } else {
+      // Text mode - single analysis
+      const { data: analysis, error: insertErr } = await supabase
         .from("bid_analyses")
-        .select("*")
-        .eq("id", analysis.id)
+        .insert({ user_id: user.id, project_name: projectName || "未命名项目", custom_prompt: customPrompt.trim() || null } as any)
+        .select()
         .single();
-      if (updated) setSelectedAnalysis(updated as BidAnalysis);
-    } catch (err: any) {
-      toast({ title: "解析失败", description: err.message, variant: "destructive" });
+
+      if (insertErr || !analysis) {
+        toast({ title: "创建失败", description: insertErr?.message, variant: "destructive" });
+        setAnalyzing(false);
+        return;
+      }
+
+      try {
+        const { error: fnErr } = await supabase.functions.invoke("parse-bid", {
+          body: {
+            analysisId: analysis.id,
+            projectName: projectName || "未命名项目",
+            customPrompt: customPrompt.trim() || undefined,
+            content: content.substring(0, 30000),
+          },
+        });
+        if (fnErr) throw fnErr;
+
+        toast({ title: "解析完成", description: "招标文件已完成智能解析" });
+        setContent("");
+        setProjectName("");
+        setShowForm(false);
+        await fetchAnalyses();
+
+        const { data: updated } = await supabase
+          .from("bid_analyses")
+          .select("*")
+          .eq("id", analysis.id)
+          .single();
+        if (updated) setSelectedAnalysis(updated as BidAnalysis);
+      } catch (err: any) {
+        toast({ title: "解析失败", description: err.message, variant: "destructive" });
+      }
     }
     setAnalyzing(false);
   };
@@ -540,7 +578,7 @@ export default function BidParser() {
 
             {inputMode === "file" ? (
               <div className="space-y-2">
-                <Label>上传招标文件</Label>
+                <Label>上传招标文件（支持多个）</Label>
                 <div
                   className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-accent/50 hover:bg-accent/5 transition-colors"
                   onClick={() => document.getElementById("bid-file-upload")?.click()}
@@ -550,30 +588,49 @@ export default function BidParser() {
                     id="bid-file-upload"
                     className="hidden"
                     accept=".pdf,.doc,.docx"
+                    multiple
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setUploadedFile(file);
-                        if (!projectName) setProjectName(file.name.replace(/\.(pdf|docx?|txt)$/i, ""));
+                      const files = e.target.files;
+                      if (files && files.length > 0) {
+                        setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
+                        if (!projectName && files.length === 1) {
+                          setProjectName(files[0].name.replace(/\.(pdf|docx?|txt)$/i, ""));
+                        }
                       }
                       e.target.value = "";
                     }}
                   />
-                  {uploadedFile ? (
-                    <div className="flex items-center justify-center gap-3">
-                      <FileText className="w-8 h-8 text-accent" />
-                      <div className="text-left">
-                        <p className="font-medium text-foreground">{uploadedFile.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB · 点击更换文件
-                        </p>
-                      </div>
+                  {uploadedFiles.length > 0 ? (
+                    <div className="space-y-2">
+                      {uploadedFiles.map((file, i) => (
+                        <div key={i} className="flex items-center justify-between gap-3 bg-muted/50 rounded-lg px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-5 h-5 text-accent shrink-0" />
+                            <div className="text-left min-w-0">
+                              <p className="font-medium text-foreground text-sm truncate">{file.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {(file.size / (1024 * 1024)).toFixed(2)} MB
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setUploadedFiles((prev) => prev.filter((_, idx) => idx !== i));
+                            }}
+                            className="text-muted-foreground hover:text-destructive shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-foreground mt-2">点击继续添加更多文件</p>
                     </div>
                   ) : (
                     <>
                       <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
                       <p className="text-sm font-medium text-foreground">点击上传招标文件</p>
-                      <p className="text-xs text-muted-foreground mt-1">支持 PDF、Word 格式，最大 20MB</p>
+                      <p className="text-xs text-muted-foreground mt-1">支持 PDF、Word 格式，可选择多个文件，最大 20MB/个</p>
                     </>
                   )}
                 </div>
@@ -615,7 +672,7 @@ export default function BidParser() {
                 {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSearch className="w-4 h-4" />}
                 {analyzing ? "AI解析中..." : "开始解析"}
               </Button>
-              <Button variant="outline" onClick={() => { setShowForm(false); setContent(""); setProjectName(""); setUploadedFile(null); }}>
+              <Button variant="outline" onClick={() => { setShowForm(false); setContent(""); setProjectName(""); setUploadedFiles([]); }}>
                 取消
               </Button>
             </div>
