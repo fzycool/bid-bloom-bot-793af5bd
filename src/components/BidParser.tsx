@@ -304,9 +304,8 @@ export default function BidParser() {
           </Card>
         )}
 
-        {/* Basic info card */}
-        {(a.bid_deadline || a.bid_location || a.requires_presentation !== null || a.deposit_amount) && (
-          <Card className="border-2 border-accent/30">
+        {/* Basic info card - always show */}
+        <Card className="border-2 border-accent/30">
             <CardContent className="p-5">
               <h3 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">📋 招标基本信息</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -339,7 +338,8 @@ export default function BidParser() {
               </div>
             </CardContent>
           </Card>
-        )}
+
+
 
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
