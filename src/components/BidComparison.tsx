@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ export default function BidComparison() {
   const [title, setTitle] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<ComparisonRecord | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchRecords = useCallback(async () => {
     if (!user) return;
@@ -414,17 +415,19 @@ export default function BidComparison() {
               <Label>上传招标文件（至少2个）</Label>
               <div
                 className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-accent/50 hover:bg-accent/5 transition-colors"
-                onClick={() => document.getElementById("compare-file-upload")?.click()}
+                onClick={() => fileInputRef.current?.click()}
               >
                 <input
+                  ref={fileInputRef}
                   type="file"
-                  id="compare-file-upload"
                   className="hidden"
                   accept=".pdf,.doc,.docx"
                   multiple
                   onChange={(e) => {
                     const files = e.target.files;
-                    if (files) setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
+                    if (files && files.length > 0) {
+                      setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
+                    }
                     e.target.value = "";
                   }}
                 />
