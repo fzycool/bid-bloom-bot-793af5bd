@@ -254,6 +254,36 @@ export default function ResumeFactory() {
     toast({ title: "已复制到剪贴板" });
   };
 
+  const generatePolishInstructions = useCallback((bidId: string) => {
+    if (!bidId || bidId === "none") return;
+    const bid = bidAnalyses.find((b) => b.id === bidId);
+    if (!bid) return;
+    const empSkills = selectedEmployee?.skills || [];
+    const empCerts = selectedEmployee?.certifications || [];
+    const techKws = (bid.technical_keywords || []) as string[];
+    const bizKws = (bid.business_keywords || []) as string[];
+    const respKws = (bid.responsibility_keywords || []) as string[];
+    const allBidKws = [...techKws, ...bizKws, ...respKws];
+    const matched = allBidKws.filter((k) => empSkills.some((s) => k.includes(s) || s.includes(k)));
+    const missing = allBidKws.filter((k) => !empSkills.some((s) => k.includes(s) || s.includes(k)));
+
+    let instructions = `【招标关键词与简历对照】\n`;
+    if (matched.length > 0) instructions += `✅ 已有匹配（需重点强化）：${matched.join("、")}\n`;
+    if (missing.length > 0) instructions += `⚠️ 缺失关键词（需从经历中挖掘关联）：${missing.join("、")}\n`;
+    if (empCerts.length > 0) instructions += `📜 现有证书：${empCerts.join("、")}\n`;
+
+    const roles = (bid.personnel_requirements || []) as any[];
+    if (roles.length > 0) {
+      instructions += `\n【招标人员要求】\n`;
+      roles.forEach((r: any) => {
+        instructions += `• ${r.role}${r.count ? `(${r.count}人)` : ""}: ${r.qualifications || ""}${r.certifications?.length ? `, 证书:${r.certifications.join("/")}` : ""}${r.experience_years ? `, ${r.experience_years}年+` : ""}\n`;
+      });
+    }
+
+    instructions += `\n【润色要求】\n1. 将简历中的职责描述对齐到招标评分关键词\n2. 对已有匹配技能进行量化强化（加入具体数据和成果）\n3. 对缺失关键词从现有经历中挖掘关联描述\n4. 保持时间线不变，不编造经历`;
+    setPolishInstructions(instructions);
+  }, [bidAnalyses, selectedEmployee]);
+
   // ====== VERSION DETAIL VIEW ======
   if (selectedVersion) {
     const v = selectedVersion;
@@ -271,7 +301,11 @@ export default function ResumeFactory() {
           )}
         </div>
 
-        <Tabs defaultValue="timeline">
+        <Tabs defaultValue="timeline" onValueChange={(tab) => {
+          if (tab === "polish" && selectedBidId && selectedBidId !== "none" && !polishInstructions) {
+            generatePolishInstructions(selectedBidId);
+          }
+        }}>
           <TabsList className="grid grid-cols-4 w-full">
             <TabsTrigger value="timeline" className="text-xs gap-1"><Clock className="w-3.5 h-3.5" />时间线稽查</TabsTrigger>
             <TabsTrigger value="match" className="text-xs gap-1"><Target className="w-3.5 h-3.5" />匹配分析</TabsTrigger>
@@ -473,36 +507,7 @@ export default function ResumeFactory() {
                 <Label className="text-xs">关联招标项目（选择后自动生成润色要求）</Label>
                 <Select value={selectedBidId} onValueChange={(val) => {
                   setSelectedBidId(val);
-                  // Auto-generate polish instructions from bid keywords + resume
-                  if (val && val !== "none") {
-                    const bid = bidAnalyses.find((b) => b.id === val);
-                    if (bid) {
-                      const empSkills = selectedEmployee?.skills || [];
-                      const empCerts = selectedEmployee?.certifications || [];
-                      const techKws = (bid.technical_keywords || []) as string[];
-                      const bizKws = (bid.business_keywords || []) as string[];
-                      const respKws = (bid.responsibility_keywords || []) as string[];
-                      const allBidKws = [...techKws, ...bizKws, ...respKws];
-                      const matched = allBidKws.filter((k) => empSkills.some((s) => k.includes(s) || s.includes(k)));
-                      const missing = allBidKws.filter((k) => !empSkills.some((s) => k.includes(s) || s.includes(k)));
-
-                      let instructions = `【招标关键词与简历对照】\n`;
-                      if (matched.length > 0) instructions += `✅ 已有匹配（需重点强化）：${matched.join("、")}\n`;
-                      if (missing.length > 0) instructions += `⚠️ 缺失关键词（需从经历中挖掘关联）：${missing.join("、")}\n`;
-                      if (empCerts.length > 0) instructions += `📜 现有证书：${empCerts.join("、")}\n`;
-
-                      const roles = (bid.personnel_requirements || []) as any[];
-                      if (roles.length > 0) {
-                        instructions += `\n【招标人员要求】\n`;
-                        roles.forEach((r: any) => {
-                          instructions += `• ${r.role}${r.count ? `(${r.count}人)` : ""}: ${r.qualifications || ""}${r.certifications?.length ? `, 证书:${r.certifications.join("/")}` : ""}${r.experience_years ? `, ${r.experience_years}年+` : ""}\n`;
-                        });
-                      }
-
-                      instructions += `\n【润色要求】\n1. 将简历中的职责描述对齐到招标评分关键词\n2. 对已有匹配技能进行量化强化（加入具体数据和成果）\n3. 对缺失关键词从现有经历中挖掘关联描述\n4. 保持时间线不变，不编造经历`;
-                      setPolishInstructions(instructions);
-                    }
-                  }
+                  generatePolishInstructions(val);
                 }}>
                   <SelectTrigger><SelectValue placeholder="选择招标项目" /></SelectTrigger>
                   <SelectContent>
