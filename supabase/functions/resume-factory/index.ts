@@ -184,7 +184,7 @@ serve(async (req) => {
 
     // ---- ACTION: match-resume (compare resume against bid requirements) ----
     if (action === "match-resume") {
-      const { resumeVersionId, bidAnalysisId } = params;
+      const { resumeVersionId, bidAnalysisId, customPrompt } = params;
 
       // Fetch resume and bid data
       const [{ data: resume }, { data: bid }] = await Promise.all([
@@ -196,15 +196,7 @@ serve(async (req) => {
 
       await supabase.from("resume_versions").update({ ai_status: "matching" }).eq("id", resumeVersionId);
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            {
-              role: "system",
-              content: `你是招投标人员配置专家。请分析简历与招标要求的匹配度，返回JSON：
+      let systemContent = `你是招投标人员配置专家。请分析简历与招标要求的匹配度，返回JSON：
 {
   "match_score": 0-100的匹配度分数,
   "match_details": {
@@ -212,11 +204,25 @@ serve(async (req) => {
     "weaknesses": ["不足1", "不足2"],
     "missing_keywords": ["缺失关键词1"],
     "suggested_role": "建议担任的角色",
-    "improvement_suggestions": ["改进建议1"]
+    "improvement_suggestions": ["改进建议1"],
+    "keyword_coverage": {"matched": ["已匹配关键词"], "missing": ["未匹配关键词"]},
+    "experience_relevance": "经验相关性分析文字描述",
+    "certification_match": "证书匹配分析文字描述",
+    "overall_assessment": "总体评价文字描述（50-100字）"
   }
-}
-请严格输出纯JSON。`,
-            },
+}`;
+      if (customPrompt) {
+        systemContent += `\n\n【用户自定义分析要求】\n${customPrompt}`;
+      }
+      systemContent += `\n请严格输出纯JSON。`;
+
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { role: "system", content: systemContent },
             {
               role: "user",
               content: `【招标要求】

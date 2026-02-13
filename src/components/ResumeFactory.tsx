@@ -90,6 +90,9 @@ export default function ResumeFactory() {
   // Match/polish
   const [selectedBidId, setSelectedBidId] = useState<string>("");
   const [polishInstructions, setPolishInstructions] = useState("");
+  const [matchPrompt, setMatchPrompt] = useState(
+    "1. 分析候选人与招标要求的匹配程度\n2. 列出候选人的核心优势和不足\n3. 标出简历中缺失的关键词\n4. 推荐最适合的投标角色\n5. 给出具体的简历改进建议"
+  );
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -204,7 +207,7 @@ export default function ResumeFactory() {
     setProcessing(true);
     try {
       const { error } = await supabase.functions.invoke("resume-factory", {
-        body: { action: "match-resume", resumeVersionId: versionId, bidAnalysisId: selectedBidId },
+        body: { action: "match-resume", resumeVersionId: versionId, bidAnalysisId: selectedBidId, customPrompt: matchPrompt.trim() || undefined },
       });
       if (error) throw error;
       toast({ title: "匹配分析完成" });
@@ -313,10 +316,9 @@ export default function ResumeFactory() {
             )}
           </TabsContent>
 
-          {/* Match */}
           <TabsContent value="match" className="space-y-4 mt-4">
-            <div className="flex items-end gap-3">
-              <div className="flex-1 space-y-1">
+            <div className="space-y-3">
+              <div className="space-y-1">
                 <Label className="text-xs">选择招标项目进行匹配</Label>
                 <Select value={selectedBidId} onValueChange={setSelectedBidId}>
                   <SelectTrigger><SelectValue placeholder="选择已解析的招标项目" /></SelectTrigger>
@@ -327,6 +329,18 @@ export default function ResumeFactory() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs flex items-center gap-2">
+                  📝 自定义匹配分析要求
+                  <span className="text-muted-foreground font-normal">（告诉AI重点分析哪些方面）</span>
+                </Label>
+                <Textarea
+                  placeholder="输入你希望AI重点分析的匹配维度..."
+                  value={matchPrompt}
+                  onChange={(e) => setMatchPrompt(e.target.value)}
+                  className="min-h-[100px] text-sm"
+                />
+              </div>
               <Button onClick={() => handleMatch(v.id)} disabled={processing || !selectedBidId} className="gap-1.5">
                 {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
                 开始匹配
@@ -335,34 +349,79 @@ export default function ResumeFactory() {
 
             {v.match_score !== null && v.match_details && (
               <Card>
-                <CardContent className="p-5 space-y-4">
-                  <div className="flex items-center gap-4">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Target className="w-4 h-4 text-accent" />
+                    匹配分析结果
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-5 pt-0 space-y-4">
+                  {/* Score + Role */}
+                  <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
                     <div className={`text-4xl font-bold ${(v.match_score ?? 0) >= 70 ? "text-green-600" : (v.match_score ?? 0) >= 40 ? "text-yellow-600" : "text-red-600"}`}>
                       {v.match_score}%
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {v.match_details.suggested_role && <p>建议角色: <span className="text-foreground font-medium">{v.match_details.suggested_role}</span></p>}
+                    <div className="flex-1">
+                      {v.match_details.suggested_role && (
+                        <p className="text-sm">建议角色: <span className="text-foreground font-semibold">{v.match_details.suggested_role}</span></p>
+                      )}
+                      {v.match_details.overall_assessment && (
+                        <p className="text-xs text-muted-foreground mt-1">{v.match_details.overall_assessment}</p>
+                      )}
                     </div>
                   </div>
+
+                  {/* Strengths */}
                   {v.match_details.strengths?.length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold text-green-700 mb-1">✅ 优势</h4>
-                      <ul className="text-sm text-foreground space-y-1">
+                      <h4 className="text-sm font-semibold text-foreground mb-2">✅ 优势</h4>
+                      <ul className="text-sm text-foreground space-y-1 pl-1">
                         {v.match_details.strengths.map((s: string, i: number) => <li key={i}>• {s}</li>)}
                       </ul>
                     </div>
                   )}
+
+                  {/* Weaknesses */}
                   {v.match_details.weaknesses?.length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold text-red-700 mb-1">⚠️ 不足</h4>
-                      <ul className="text-sm text-foreground space-y-1">
+                      <h4 className="text-sm font-semibold text-foreground mb-2">⚠️ 不足</h4>
+                      <ul className="text-sm text-foreground space-y-1 pl-1">
                         {v.match_details.weaknesses.map((s: string, i: number) => <li key={i}>• {s}</li>)}
                       </ul>
                     </div>
                   )}
-                  {v.match_details.missing_keywords?.length > 0 && (
+
+                  {/* Keyword coverage */}
+                  {v.match_details.keyword_coverage && (
                     <div>
-                      <h4 className="text-sm font-semibold text-foreground mb-1">缺失关键词</h4>
+                      <h4 className="text-sm font-semibold text-foreground mb-2">🔑 关键词覆盖</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">已匹配</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(v.match_details.keyword_coverage.matched || []).map((k: string, i: number) => (
+                              <Badge key={i} className="text-xs bg-green-100 text-green-800">{k}</Badge>
+                            ))}
+                            {!(v.match_details.keyword_coverage.matched?.length > 0) && <span className="text-xs text-muted-foreground">无</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">未匹配</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(v.match_details.keyword_coverage.missing || []).map((k: string, i: number) => (
+                              <Badge key={i} variant="outline" className="text-xs border-destructive text-destructive">{k}</Badge>
+                            ))}
+                            {!(v.match_details.keyword_coverage.missing?.length > 0) && <span className="text-xs text-muted-foreground">无</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Legacy missing_keywords fallback */}
+                  {!v.match_details.keyword_coverage && v.match_details.missing_keywords?.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground mb-2">缺失关键词</h4>
                       <div className="flex flex-wrap gap-1">
                         {v.match_details.missing_keywords.map((k: string, i: number) => (
                           <Badge key={i} variant="outline" className="text-xs">{k}</Badge>
@@ -370,10 +429,30 @@ export default function ResumeFactory() {
                       </div>
                     </div>
                   )}
+
+                  {/* Experience & Cert analysis */}
+                  {(v.match_details.experience_relevance || v.match_details.certification_match) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {v.match_details.experience_relevance && (
+                        <div className="p-3 bg-muted/30 rounded-lg">
+                          <h5 className="text-xs font-semibold text-foreground mb-1">📋 经验相关性</h5>
+                          <p className="text-xs text-muted-foreground">{v.match_details.experience_relevance}</p>
+                        </div>
+                      )}
+                      {v.match_details.certification_match && (
+                        <div className="p-3 bg-muted/30 rounded-lg">
+                          <h5 className="text-xs font-semibold text-foreground mb-1">📜 证书匹配</h5>
+                          <p className="text-xs text-muted-foreground">{v.match_details.certification_match}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Improvement suggestions */}
                   {v.match_details.improvement_suggestions?.length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold text-foreground mb-1">💡 改进建议</h4>
-                      <ul className="text-sm text-muted-foreground space-y-1">
+                      <h4 className="text-sm font-semibold text-foreground mb-2">💡 改进建议</h4>
+                      <ul className="text-sm text-muted-foreground space-y-1 pl-1">
                         {v.match_details.improvement_suggestions.map((s: string, i: number) => <li key={i}>• {s}</li>)}
                       </ul>
                     </div>
