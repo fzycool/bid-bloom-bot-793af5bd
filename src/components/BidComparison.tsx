@@ -413,24 +413,24 @@ export default function BidComparison() {
 
             <div className="space-y-2">
               <Label>上传招标文件（至少2个）</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                multiple
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (files && files.length > 0) {
+                    setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
+                  }
+                  e.target.value = "";
+                }}
+              />
               <div
                 className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-accent/50 hover:bg-accent/5 transition-colors"
                 onClick={() => fileInputRef.current?.click()}
               >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.doc,.docx"
-                  multiple
-                  onChange={(e) => {
-                    const files = e.target.files;
-                    if (files && files.length > 0) {
-                      setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
-                    }
-                    e.target.value = "";
-                  }}
-                />
                 {uploadedFiles.length > 0 ? (
                   <div className="space-y-2">
                     {uploadedFiles.map((file, i) => (
