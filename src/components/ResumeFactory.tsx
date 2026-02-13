@@ -120,7 +120,10 @@ export default function ResumeFactory() {
       .select("*")
       .eq("employee_id", employeeId)
       .order("created_at", { ascending: false });
-    setVersions((data as ResumeVersion[]) || []);
+    const list = (data as ResumeVersion[]) || [];
+    setVersions(list);
+    // Keep selectedVersion in sync with fresh data
+    setSelectedVersion((prev) => prev ? list.find((v) => v.id === prev.id) || prev : prev);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
