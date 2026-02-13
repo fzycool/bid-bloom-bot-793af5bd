@@ -8,7 +8,7 @@ const Footer = () => {
             <span className="text-2xl font-black text-accent">工场</span>
           </div>
           <p className="text-sm text-primary-foreground/40">
-            © 2026 智标工场 · 招投标全流程智能协作平台
+            © 2026 润和捷科AI智标工厂 由 AI代码开发 润和AI中心
           </p>
         </div>
       </div>
