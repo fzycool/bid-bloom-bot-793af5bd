@@ -882,31 +882,56 @@ export default function ResumeFactory() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {employees.map((emp) => (
-            <Card key={emp.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedEmployee(emp)}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-semibold text-foreground">{emp.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {emp.current_company || "未填写公司"}
-                      {emp.current_position && ` · ${emp.current_position}`}
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteEmployee(emp.id); }}>
-                    <Trash2 className="w-4 h-4 text-muted-foreground" />
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {emp.education && <Badge variant="secondary" className="text-xs">{emp.education}</Badge>}
-                  {emp.years_of_experience && <Badge variant="secondary" className="text-xs">{emp.years_of_experience}年</Badge>}
-                  {emp.certifications?.slice(0, 2).map((c, i) => <Badge key={i} variant="outline" className="text-xs">{c}</Badge>)}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card>
+          <div className="overflow-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">姓名</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">公司</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">职位</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">学历</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">经验</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">证书/技能</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground w-16">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employees.map((emp) => (
+                  <tr
+                    key={emp.id}
+                    className="border-b last:border-0 cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => setSelectedEmployee(emp)}
+                  >
+                    <td className="px-4 py-3 font-medium text-foreground">{emp.name}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{emp.current_company || "-"}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{emp.current_position || "-"}</td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      {emp.education ? <Badge variant="secondary" className="text-xs">{emp.education}</Badge> : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                      {emp.years_of_experience ? `${emp.years_of_experience}年` : "-"}
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {emp.certifications?.slice(0, 2).map((c, i) => <Badge key={i} variant="outline" className="text-xs">{c}</Badge>)}
+                        {emp.skills?.slice(0, 2).map((s, i) => <Badge key={`s${i}`} variant="secondary" className="text-xs">{s}</Badge>)}
+                        {((emp.certifications?.length || 0) + (emp.skills?.length || 0)) > 4 && (
+                          <span className="text-xs text-muted-foreground">+{(emp.certifications?.length || 0) + (emp.skills?.length || 0) - 4}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleDeleteEmployee(emp.id); }}>
+                        <Trash2 className="w-4 h-4 text-muted-foreground" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
     </div>
   );
