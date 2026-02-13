@@ -925,7 +925,7 @@ export default function ResumeFactory() {
                     className="border-b last:border-0 cursor-pointer hover:bg-muted/50 transition-colors"
                     onClick={() => setSelectedEmployee(emp)}
                   >
-                    <td className="px-4 py-3 font-medium text-foreground">{emp.name}</td>
+                    <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">{emp.name}</td>
                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{emp.current_company || "-"}</td>
                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{emp.current_position || "-"}</td>
                     <td className="px-4 py-3 hidden md:table-cell">
