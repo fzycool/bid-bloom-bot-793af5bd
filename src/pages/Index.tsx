@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
 import {
   Shield,
   FileSearch,
@@ -12,10 +15,14 @@ import {
   CheckCircle,
   Eye,
   EyeOff,
+  Loader2,
 } from "lucide-react";
 
 const Index = () => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [registerForm, setRegisterForm] = useState({
     name: "",
@@ -33,11 +40,61 @@ const Index = () => {
     { icon: CheckCircle, label: "合规避险保障" },
   ];
 
+  const handleLogin = async () => {
+    if (!loginForm.email || !loginForm.password) {
+      toast({ title: "请填写邮箱和密码", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: loginForm.email,
+      password: loginForm.password,
+    });
+    setLoading(false);
+    if (error) {
+      toast({ title: "登录失败", description: error.message, variant: "destructive" });
+    } else {
+      navigate("/dashboard");
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!registerForm.name || !registerForm.email || !registerForm.password) {
+      toast({ title: "请填写所有必填项", variant: "destructive" });
+      return;
+    }
+    if (registerForm.password !== registerForm.confirmPassword) {
+      toast({ title: "两次密码输入不一致", variant: "destructive" });
+      return;
+    }
+    if (registerForm.password.length < 8) {
+      toast({ title: "密码至少8位", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.signUp({
+      email: registerForm.email,
+      password: registerForm.password,
+      options: {
+        emailRedirectTo: window.location.origin,
+        data: {
+          full_name: registerForm.name,
+          company: registerForm.company,
+        },
+      },
+    });
+    setLoading(false);
+    if (error) {
+      toast({ title: "注册失败", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "注册成功", description: "请查收验证邮件后登录" });
+    }
+  };
+
   return (
     <div className="min-h-screen flex">
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-[55%] bg-hero relative overflow-hidden flex-col justify-between p-12">
-        {/* Decorative elements */}
         <div className="absolute inset-0 bg-glow opacity-30" />
         <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-accent/10 blur-3xl" />
         <div className="absolute -top-16 -right-16 w-72 h-72 rounded-full bg-accent/5 blur-2xl" />
@@ -94,7 +151,6 @@ const Index = () => {
       {/* Right Panel - Auth Form */}
       <div className="w-full lg:w-[45%] flex items-center justify-center p-6 sm:p-12 bg-background">
         <div className="w-full max-w-md">
-          {/* Mobile branding */}
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
             <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center">
               <Shield className="w-5 h-5 text-accent-foreground" />
@@ -112,7 +168,6 @@ const Index = () => {
               </TabsTrigger>
             </TabsList>
 
-            {/* Login Tab */}
             <TabsContent value="login">
               <Card className="border-0 shadow-none bg-transparent">
                 <CardContent className="p-0 space-y-6">
@@ -136,6 +191,7 @@ const Index = () => {
                         onChange={(e) =>
                           setLoginForm({ ...loginForm, email: e.target.value })
                         }
+                        onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                       />
                     </div>
 
@@ -158,6 +214,7 @@ const Index = () => {
                               password: e.target.value,
                             })
                           }
+                          onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                         />
                         <button
                           type="button"
@@ -174,14 +231,18 @@ const Index = () => {
                     </div>
                   </div>
 
-                  <Button className="w-full h-11 text-sm font-semibold">
+                  <Button
+                    className="w-full h-11 text-sm font-semibold"
+                    onClick={handleLogin}
+                    disabled={loading}
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                     登 录
                   </Button>
                 </CardContent>
               </Card>
             </TabsContent>
 
-            {/* Register Tab */}
             <TabsContent value="register">
               <Card className="border-0 shadow-none bg-transparent">
                 <CardContent className="p-0 space-y-6">
@@ -275,7 +336,12 @@ const Index = () => {
                     </div>
                   </div>
 
-                  <Button className="w-full h-11 text-sm font-semibold">
+                  <Button
+                    className="w-full h-11 text-sm font-semibold"
+                    onClick={handleRegister}
+                    disabled={loading}
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                     注 册
                   </Button>
 
