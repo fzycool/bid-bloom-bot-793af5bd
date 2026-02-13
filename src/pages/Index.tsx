@@ -86,7 +86,7 @@ const Index = () => {
 
         <div className="relative z-10">
           <p className="text-primary-foreground/40 text-xs">
-            © 2024 润和捷科AI智标工厂 · 企业内部系统 · 数据安全保障
+            润和捷科AI智标工厂 由 AI代码开发
           </p>
         </div>
       </div>
