@@ -90,7 +90,8 @@ export default function KnowledgeBase() {
     setUploading(true);
     for (const file of Array.from(files)) {
       try {
-        const filePath = `${user.id}/${Date.now()}-${file.name}`;
+        const fileExt = file.name.split('.').pop() || 'bin';
+        const filePath = `${user.id}/${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
           .from("knowledge-base")
           .upload(filePath, file);
