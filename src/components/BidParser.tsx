@@ -754,54 +754,52 @@ export default function BidParser() {
               onClick={() => a.ai_status === "completed" && setSelectedAnalysis(a)}
             >
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-foreground">{a.project_name}</span>
-                      {a.ai_status === "processing" && (
-                        <Badge className="bg-blue-100 text-blue-800 gap-1">
-                          <Loader2 className="w-3 h-3 animate-spin" />解析中
-                        </Badge>
-                      )}
-                      {a.ai_status === "completed" && a.risk_score !== null && (
-                        <Badge className={`${a.risk_score >= 70 ? "bg-red-100 text-red-800" : a.risk_score >= 40 ? "bg-orange-100 text-orange-800" : "bg-green-100 text-green-800"}`}>
-                          风险: {a.risk_score}
-                        </Badge>
-                      )}
-                      {a.ai_status === "failed" && (
-                        <Badge variant="destructive">解析失败</Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground flex-wrap">
-                      <span>{new Date(a.created_at).toLocaleString("zh-CN")}</span>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-foreground text-sm line-clamp-1">{a.project_name}</span>
+                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
+                      <span className="whitespace-nowrap">{new Date(a.created_at).toLocaleString("zh-CN")}</span>
                       {a.bid_deadline && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold text-xs">
-                          📅 投标截止: {new Date(a.bid_deadline).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold text-xs whitespace-nowrap">
+                          📅 {new Date(a.bid_deadline).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                         </span>
                       )}
                       {a.bid_location && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold text-xs">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold text-xs whitespace-nowrap">
                           📍 {a.bid_location}
                         </span>
                       )}
                       {a.ai_status === "completed" && (
                         <>
-                          <span>废标项: {(a.disqualification_items as any[])?.length || 0}</span>
-                          <span>陷阱项: {(a.trap_items as any[])?.length || 0}</span>
+                          <span className="whitespace-nowrap">废标项: {(a.disqualification_items as any[])?.length || 0}</span>
+                          <span className="whitespace-nowrap">陷阱项: {(a.trap_items as any[])?.length || 0}</span>
                         </>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {a.ai_status === "processing" && (
+                      <Badge className="bg-blue-100 text-blue-800 gap-1 whitespace-nowrap">
+                        <Loader2 className="w-3 h-3 animate-spin" />解析中
+                      </Badge>
+                    )}
+                    {a.ai_status === "completed" && a.risk_score !== null && (
+                      <Badge className={`whitespace-nowrap ${a.risk_score >= 70 ? "bg-red-100 text-red-800" : a.risk_score >= 40 ? "bg-orange-100 text-orange-800" : "bg-green-100 text-green-800"}`}>
+                        风险: {a.risk_score}
+                      </Badge>
+                    )}
+                    {a.ai_status === "failed" && (
+                      <Badge variant="destructive" className="whitespace-nowrap">解析失败</Badge>
+                    )}
                     {a.ai_status === "completed" && (
-                      <Button variant="ghost" size="sm" className="text-xs gap-1">
+                      <Button variant="ghost" size="sm" className="text-xs gap-1 shrink-0">
                         <Eye className="w-3.5 h-3.5" />查看
                       </Button>
                     )}
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="text-muted-foreground hover:text-destructive"
+                      className="text-muted-foreground hover:text-destructive shrink-0"
                       onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }}
                     >
                       <Trash2 className="w-4 h-4" />
