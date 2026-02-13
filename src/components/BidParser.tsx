@@ -38,6 +38,8 @@ interface BidAnalysis {
   risk_score: number | null;
   ai_status: string;
   created_at: string;
+  custom_prompt: string | null;
+  document_id: string | null;
 }
 
 export default function BidParser() {
@@ -55,6 +57,8 @@ export default function BidParser() {
   const [inputMode, setInputMode] = useState<"file" | "text">("file");
   const [selectedAnalysis, setSelectedAnalysis] = useState<BidAnalysis | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState("");
+  const [reAnalyzing, setReAnalyzing] = useState(false);
 
   const fetchAnalyses = useCallback(async () => {
     if (!user) return;
@@ -100,7 +104,7 @@ export default function BidParser() {
 
     const { data: analysis, error: insertErr } = await supabase
       .from("bid_analyses")
-      .insert({ user_id: user.id, project_name: projectName || uploadedFile?.name || "未命名项目" })
+      .insert({ user_id: user.id, project_name: projectName || uploadedFile?.name || "未命名项目", custom_prompt: customPrompt.trim() || null } as any)
       .select()
       .single();
 
@@ -152,6 +156,45 @@ export default function BidParser() {
     toast({ title: "已删除" });
   };
 
+  const handleReAnalyze = async () => {
+    if (!selectedAnalysis || !user) return;
+    setReAnalyzing(true);
+    const newPrompt = editingPrompt.trim() || null;
+
+    // Update stored prompt
+    await supabase.from("bid_analyses").update({ ai_status: "processing", custom_prompt: newPrompt } as any).eq("id", selectedAnalysis.id);
+    setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing", custom_prompt: newPrompt } : prev);
+
+    try {
+      const body: any = {
+        analysisId: selectedAnalysis.id,
+        projectName: selectedAnalysis.project_name || "未命名项目",
+        customPrompt: newPrompt || undefined,
+      };
+
+      // If there's a document_id, get the file path from documents table
+      if (selectedAnalysis.document_id) {
+        const { data: doc } = await supabase.from("documents").select("file_path, file_type").eq("id", selectedAnalysis.document_id).single();
+        if (doc) {
+          body.filePath = doc.file_path;
+          body.fileType = doc.file_type || "";
+        }
+      }
+
+      const { error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
+      if (fnErr) throw fnErr;
+
+      toast({ title: "重新解析完成" });
+      await fetchAnalyses();
+      const { data: updated } = await supabase.from("bid_analyses").select("*").eq("id", selectedAnalysis.id).single();
+      if (updated) setSelectedAnalysis(updated as BidAnalysis);
+    } catch (err: any) {
+      toast({ title: "解析失败", description: err.message, variant: "destructive" });
+      await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);
+    }
+    setReAnalyzing(false);
+  };
+
   const severityConfig: Record<string, { color: string; label: string }> = {
     critical: { color: "bg-red-100 text-red-800 border-red-200", label: "必废标" },
     high: { color: "bg-orange-100 text-orange-800 border-orange-200", label: "极高风险" },
@@ -163,6 +206,13 @@ export default function BidParser() {
     if (score >= 40) return "text-orange-500";
     return "text-green-600";
   };
+
+  // When selecting an analysis, initialize editing prompt
+  useEffect(() => {
+    if (selectedAnalysis) {
+      setEditingPrompt(selectedAnalysis.custom_prompt || "1. 评分标准表（分类、权重、评分细则、佐证材料）\n2. 废标项（★标记、否决投标条款）\n3. 陷阱项（容易忽略的失分条款）\n4. 人员配置要求（角色、数量、资质、证书）\n5. 专业技能/业务技能/职责关键词\n6. 风险评分与总体分析");
+    }
+  }, [selectedAnalysis?.id]);
 
   if (selectedAnalysis) {
     const a = selectedAnalysis;
@@ -196,6 +246,33 @@ export default function BidParser() {
             </CardContent>
           </Card>
         )}
+
+        {/* Editable prompt */}
+        <Card>
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              📝 解析提示词
+              <span className="text-xs text-muted-foreground font-normal">（修改后可重新解析）</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 space-y-3">
+            <Textarea
+              value={editingPrompt}
+              onChange={(e) => setEditingPrompt(e.target.value)}
+              className="min-h-[100px] text-sm"
+              disabled={reAnalyzing}
+            />
+            <Button
+              onClick={handleReAnalyze}
+              disabled={reAnalyzing}
+              size="sm"
+              className="gap-2"
+            >
+              {reAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSearch className="w-4 h-4" />}
+              {reAnalyzing ? "重新解析中..." : "重新解析"}
+            </Button>
+          </CardContent>
+        </Card>
 
         <Tabs defaultValue="disqualification">
           <TabsList className="grid grid-cols-5 w-full">

@@ -1,0 +1,1 @@
+ALTER TABLE public.bid_analyses ADD COLUMN custom_prompt text;

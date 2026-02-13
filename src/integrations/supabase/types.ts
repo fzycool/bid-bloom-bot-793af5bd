@@ -19,6 +19,7 @@ export type Database = {
           ai_status: string
           business_keywords: Json | null
           created_at: string
+          custom_prompt: string | null
           disqualification_items: Json | null
           document_id: string | null
           id: string
@@ -37,6 +38,7 @@ export type Database = {
           ai_status?: string
           business_keywords?: Json | null
           created_at?: string
+          custom_prompt?: string | null
           disqualification_items?: Json | null
           document_id?: string | null
           id?: string
@@ -55,6 +57,7 @@ export type Database = {
           ai_status?: string
           business_keywords?: Json | null
           created_at?: string
+          custom_prompt?: string | null
           disqualification_items?: Json | null
           document_id?: string | null
           id?: string
