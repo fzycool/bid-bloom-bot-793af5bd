@@ -150,6 +150,42 @@ export type Database = {
           },
         ]
       }
+      bid_comparisons: {
+        Row: {
+          ai_status: string
+          comparison_result: Json | null
+          created_at: string
+          file_names: string[]
+          file_paths: string[]
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_status?: string
+          comparison_result?: Json | null
+          created_at?: string
+          file_names?: string[]
+          file_paths?: string[]
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_status?: string
+          comparison_result?: Json | null
+          created_at?: string
+          file_names?: string[]
+          file_paths?: string[]
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       bid_proposals: {
         Row: {
           ai_status: string
