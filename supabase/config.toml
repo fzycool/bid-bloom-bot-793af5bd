@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.resume-factory]
 verify_jwt = false
+
+[functions.holographic-audit]
+verify_jwt = false

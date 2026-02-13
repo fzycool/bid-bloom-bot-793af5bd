@@ -14,6 +14,7 @@ import KnowledgeBase from "@/components/KnowledgeBase";
 import BidParser from "@/components/BidParser";
 import ResumeFactory from "@/components/ResumeFactory";
 import BiddingAssistant from "@/components/BiddingAssistant";
+import HolographicAudit from "@/components/HolographicAudit";
 
 const modules = [
   { id: "knowledge", label: "知识库", icon: BookOpen },
@@ -88,13 +89,7 @@ const Dashboard = () => {
           {activeModule === "parse" && <BidParser />}
           {activeModule === "resume" && <ResumeFactory />}
           {activeModule === "bid" && <BiddingAssistant />}
-          {activeModule === "audit" && (
-            <div className="text-muted-foreground text-center py-20">
-              <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">全息检查与逻辑自证</p>
-              <p className="text-sm">即将上线</p>
-            </div>
-          )}
+          {activeModule === "audit" && <HolographicAudit />}
         </main>
       </div>
     </div>

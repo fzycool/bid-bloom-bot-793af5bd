@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_reports: {
+        Row: {
+          ai_status: string
+          audit_type: string
+          created_at: string
+          findings: Json | null
+          id: string
+          proposal_id: string
+          score: number | null
+          summary: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_status?: string
+          audit_type?: string
+          created_at?: string
+          findings?: Json | null
+          id?: string
+          proposal_id: string
+          score?: number | null
+          summary?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_status?: string
+          audit_type?: string
+          created_at?: string
+          findings?: Json | null
+          id?: string
+          proposal_id?: string
+          score?: number | null
+          summary?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_reports_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "bid_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bid_analyses: {
         Row: {
           ai_status: string
