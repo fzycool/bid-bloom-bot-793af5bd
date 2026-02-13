@@ -48,7 +48,7 @@ const Index = () => {
               <Shield className="w-6 h-6 text-accent-foreground" />
             </div>
             <h1 className="text-2xl font-bold text-primary-foreground tracking-tight">
-              智标工场
+              润和捷科AI智标工厂
             </h1>
           </div>
           <p className="text-primary-foreground/60 text-sm">
@@ -86,7 +86,7 @@ const Index = () => {
 
         <div className="relative z-10">
           <p className="text-primary-foreground/40 text-xs">
-            © 2024 智标工场 · 企业内部系统 · 数据安全保障
+            © 2024 润和捷科AI智标工厂 · 企业内部系统 · 数据安全保障
           </p>
         </div>
       </div>
@@ -99,7 +99,7 @@ const Index = () => {
             <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center">
               <Shield className="w-5 h-5 text-accent-foreground" />
             </div>
-            <h1 className="text-xl font-bold text-foreground">智标工场</h1>
+            <h1 className="text-xl font-bold text-foreground">润和捷科AI智标工厂</h1>
           </div>
 
           <Tabs defaultValue="login" className="w-full">
