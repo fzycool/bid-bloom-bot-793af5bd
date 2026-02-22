@@ -98,25 +98,19 @@ serve(async (req) => {
         throw new Error(`文件下载失败: ${dlError?.message || "unknown"}`);
       }
 
+      const arrayBuffer = await fileData.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const b64 = base64Encode(uint8Array);
+      const fileName = filePath.split("/").pop() || "document";
       const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
-      if (isPdf) {
-        const arrayBuffer = await fileData.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        const b64 = base64Encode(uint8Array);
-        messages.push({
-          role: "user",
-          content: [
-            { type: "file", file: { filename: filePath.split("/").pop() || "document.pdf", file_data: `data:application/pdf;base64,${b64}` } },
-            { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
-          ],
-        });
-      } else {
-        const textContent = await fileData.text();
-        messages.push({
-          role: "user",
-          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${textContent}`,
-        });
-      }
+      const mimeType = isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      messages.push({
+        role: "user",
+        content: [
+          { type: "file", file: { filename: fileName, file_data: `data:${mimeType};base64,${b64}` } },
+          { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
+        ],
+      });
     } else if (content) {
       messages.push({
         role: "user",
