@@ -92,7 +92,21 @@ export default function BidParser() {
       .from("bid_analyses")
       .select("*")
       .order("created_at", { ascending: false });
-    setAnalyses((data as unknown as BidAnalysis[]) || []);
+    const analyses = (data as unknown as BidAnalysis[]) || [];
+    
+    // Auto-detect timeout: if processing/analyzing_structure for >5 minutes, mark as timeout
+    const TIMEOUT_MS = 5 * 60 * 1000;
+    const now = Date.now();
+    for (const a of analyses) {
+      if ((a.ai_status === "processing" || a.ai_status === "analyzing_structure") && 
+          now - new Date(a.created_at).getTime() > TIMEOUT_MS &&
+          now - new Date((a as any).updated_at || a.created_at).getTime() > TIMEOUT_MS) {
+        await supabase.from("bid_analyses").update({ ai_status: "timeout" } as any).eq("id", a.id);
+        a.ai_status = "timeout";
+      }
+    }
+    
+    setAnalyses(analyses);
     setLoading(false);
   }, [user]);
 
@@ -350,6 +364,8 @@ export default function BidParser() {
     const isCompleted = a.ai_status === "completed";
     const isAnalyzingStructure = a.ai_status === "analyzing_structure";
     const isProcessing = a.ai_status === "processing";
+    const isTimeout = a.ai_status === "timeout";
+    const isFailed = a.ai_status === "failed";
 
     return (
       <div className="space-y-6">
@@ -397,6 +413,24 @@ export default function BidParser() {
                 <p className="font-medium text-foreground">正在分析文档整体结构...</p>
                 <p className="text-sm text-muted-foreground">AI正在识别文档章节和目录结构</p>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {(isTimeout || isFailed) && (
+          <Card className="border-destructive/30">
+            <CardContent className="flex items-center justify-between p-6">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-6 h-6 text-destructive" />
+                <div>
+                  <p className="font-medium text-foreground">{isTimeout ? "解析超时" : "解析失败"}</p>
+                  <p className="text-sm text-muted-foreground">{isTimeout ? "AI处理时间过长，请尝试重新解析" : "解析过程中出现错误，请重试"}</p>
+                </div>
+              </div>
+              <Button onClick={handleReAnalyze} disabled={reAnalyzing} className="gap-2">
+                {reAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                重新解析
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -978,7 +1012,7 @@ export default function BidParser() {
             <Card
               key={a.id}
               className="hover:shadow-card-hover transition-shadow cursor-pointer"
-              onClick={() => (a.ai_status === "completed" || a.ai_status === "structure_ready") && setSelectedAnalysis(a)}
+              onClick={() => (a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed") && setSelectedAnalysis(a)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -1023,9 +1057,12 @@ export default function BidParser() {
                     {a.ai_status === "failed" && (
                       <Badge variant="destructive" className="whitespace-nowrap">解析失败</Badge>
                     )}
-                    {(a.ai_status === "completed" || a.ai_status === "structure_ready") && (
+                    {a.ai_status === "timeout" && (
+                      <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">⏱ 解析超时</Badge>
+                    )}
+                    {(a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed") && (
                       <Button variant="ghost" size="sm" className="text-xs gap-1 shrink-0">
-                        <Eye className="w-3.5 h-3.5" />{a.ai_status === "structure_ready" ? "查看结构" : "查看"}
+                        <Eye className="w-3.5 h-3.5" />{a.ai_status === "structure_ready" ? "查看结构" : a.ai_status === "timeout" ? "重试" : a.ai_status === "failed" ? "重试" : "查看"}
                       </Button>
                     )}
                     <Button
