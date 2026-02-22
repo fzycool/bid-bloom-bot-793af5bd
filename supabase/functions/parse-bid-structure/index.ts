@@ -1,6 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { unzipSync } from "npm:fflate@0.8.2";
+
+function extractTextFromDocx(arrayBuffer: ArrayBuffer): string {
+  const uint8 = new Uint8Array(arrayBuffer);
+  const unzipped = unzipSync(uint8);
+  const docXml = unzipped["word/document.xml"];
+  if (!docXml) return "";
+  const xmlStr = new TextDecoder().decode(docXml);
+  const text = xmlStr.replace(/<w:p[^>]*>/g, "\n").replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1").replace(/<[^>]+>/g, "");
+  return text.trim();
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -99,18 +110,31 @@ serve(async (req) => {
       }
 
       const arrayBuffer = await fileData.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      const b64 = base64Encode(uint8Array);
-      const fileName = filePath.split("/").pop() || "document";
       const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
-      const mimeType = isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      messages.push({
-        role: "user",
-        content: [
-          { type: "file", file: { filename: fileName, file_data: `data:${mimeType};base64,${b64}` } },
-          { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
-        ],
-      });
+
+      if (isPdf) {
+        const uint8Array = new Uint8Array(arrayBuffer);
+        const b64 = base64Encode(uint8Array);
+        const fileName = filePath.split("/").pop() || "document.pdf";
+        messages.push({
+          role: "user",
+          content: [
+            { type: "file", file: { filename: fileName, file_data: `data:application/pdf;base64,${b64}` } },
+            { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
+          ],
+        });
+      } else {
+        // DOCX/DOC: extract text content
+        const textContent = extractTextFromDocx(arrayBuffer);
+        if (!textContent) {
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          throw new Error("无法从文档中提取文本内容，请尝试转换为PDF后重新上传");
+        }
+        messages.push({
+          role: "user",
+          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${textContent}`,
+        });
+      }
     } else if (content) {
       messages.push({
         role: "user",
