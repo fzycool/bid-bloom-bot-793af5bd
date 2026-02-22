@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,7 @@ export default function BidParser() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [analyses, setAnalyses] = useState<BidAnalysis[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -854,25 +855,29 @@ export default function BidParser() {
               <div className="space-y-2">
                 <Label>上传招标文件（支持多个）</Label>
                 <input
+                  ref={fileInputRef}
                   type="file"
-                  id="bid-file-upload"
                   className="hidden"
                   accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   multiple
                   onChange={(e) => {
                     const files = e.target.files;
                     if (files && files.length > 0) {
-                      setUploadedFiles((prev) => [...prev, ...Array.from(files)]);
-                      if (!projectName && files.length === 1) {
-                        setProjectName(files[0].name.replace(/\.(pdf|docx?|txt)$/i, ""));
+                      const fileArray = Array.from(files);
+                      setUploadedFiles((prev) => [...prev, ...fileArray]);
+                      if (!projectName && fileArray.length === 1) {
+                        setProjectName(fileArray[0].name.replace(/\.(pdf|docx?|txt)$/i, ""));
                       }
                     }
-                    e.target.value = "";
+                    // Reset after a short delay to avoid clearing file references
+                    setTimeout(() => {
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }, 100);
                   }}
                 />
                 <div
                   className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-accent/50 hover:bg-accent/5 transition-colors"
-                  onClick={() => document.getElementById("bid-file-upload")?.click()}
+                  onClick={() => fileInputRef.current?.click()}
                 >
                   {uploadedFiles.length > 0 ? (
                     <div className="space-y-2">
