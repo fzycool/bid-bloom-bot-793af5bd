@@ -198,10 +198,16 @@ serve(async (req) => {
         });
       } else {
         // DOCX/DOC: extract text content
-        const textContent = extractTextFromDocx(arrayBuffer);
+        let textContent = extractTextFromDocx(arrayBuffer);
         if (!textContent) {
           await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
           throw new Error("无法从文档中提取文本内容，请尝试转换为PDF后重新上传");
+        }
+        // Truncate to avoid timeout
+        const MAX_CHARS = 120000;
+        if (textContent.length > MAX_CHARS) {
+          console.log(`Text truncated from ${textContent.length} to ${MAX_CHARS} chars for detailed analysis`);
+          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
         }
         messages.push({
           role: "user",
