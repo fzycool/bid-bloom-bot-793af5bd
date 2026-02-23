@@ -509,15 +509,15 @@ export default function BidComparison() {
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <span className="font-medium text-foreground text-sm truncate block">{r.title}</span>
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <span className="font-medium text-foreground text-sm break-all">{r.title}</span>
+                    <div className="flex flex-col gap-1 mt-2">
                       {r.file_names.map((name, i) => (
-                        <span key={i} className="flex items-center gap-1.5 text-xs">
-                          <Badge variant="secondary" className="text-[10px] font-semibold max-w-[180px] truncate">{name}</Badge>
-                          {i < r.file_names.length - 1 && (
-                            <span className="text-accent font-bold text-[11px] px-0.5">VS</span>
+                        <div key={i} className="flex items-start gap-1.5">
+                          {i > 0 && (
+                            <span className="text-accent font-bold text-[11px] shrink-0 leading-5">VS</span>
                           )}
-                        </span>
+                          <Badge variant="secondary" className="text-[10px] font-semibold whitespace-normal break-all leading-4 py-1">{name}</Badge>
+                        </div>
                       ))}
                     </div>
                     <span className="text-[11px] text-muted-foreground mt-1.5 block">
