@@ -191,25 +191,47 @@ serve(async (req) => {
       const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
 
       if (isPdf) {
-        const uint8Array = new Uint8Array(arrayBuffer);
-        const b64 = base64Encode(uint8Array);
-        const fileName = filePath.split("/").pop() || "document.pdf";
-        messages.push({
-          role: "user",
-          content: [
-            {
-              type: "file",
-              file: {
-                filename: fileName,
-                file_data: `data:application/pdf;base64,${b64}`,
-              },
-            },
-            {
-              type: "text",
-              text: `项目名称: ${projectName || "未知"}\n\n请仔细分析上传的招标文件，提取所有关键信息。`,
-            },
-          ],
-        });
+        if (isLovable) {
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const b64 = base64Encode(uint8Array);
+          const fileName = filePath.split("/").pop() || "document.pdf";
+          messages.push({
+            role: "user",
+            content: [
+              { type: "file", file: { filename: fileName, file_data: `data:application/pdf;base64,${b64}` } },
+              { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请仔细分析上传的招标文件，提取所有关键信息。` },
+            ],
+          });
+        } else {
+          // Third-party providers: extract text from PDF
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let textContent = "";
+          try {
+            const decoder = new TextDecoder("utf-8", { fatal: false });
+            const raw = decoder.decode(uint8Array);
+            const textParts: string[] = [];
+            const regex = /\(([^)]{1,500})\)/g;
+            let m;
+            while ((m = regex.exec(raw)) !== null) {
+              const t = m[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1");
+              if (t.trim().length > 1) textParts.push(t.trim());
+            }
+            textContent = textParts.join("\n");
+          } catch (_) { /* ignore */ }
+          
+          if (!textContent || textContent.length < 200) {
+            textContent = "[PDF文件无法直接提取文本内容]";
+            console.warn("PDF text extraction yielded insufficient text");
+          }
+          const MAX_CHARS = 120000;
+          if (textContent.length > MAX_CHARS) {
+            textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+          }
+          messages.push({
+            role: "user",
+            content: `项目名称: ${projectName || "未知"}\n\n以下是从招标文件中提取的内容，请仔细分析并提取所有关键信息：\n\n${textContent}`,
+          });
+        }
       } else {
         // DOCX/DOC: extract text content
         let textContent = extractTextFromDocx(arrayBuffer);

@@ -128,16 +128,51 @@ serve(async (req) => {
       const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
 
       if (isPdf) {
-        const uint8Array = new Uint8Array(arrayBuffer);
-        const b64 = base64Encode(uint8Array);
-        const fileName = filePath.split("/").pop() || "document.pdf";
-        messages.push({
-          role: "user",
-          content: [
-            { type: "file", file: { filename: fileName, file_data: `data:application/pdf;base64,${b64}` } },
-            { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
-          ],
-        });
+        if (isLovable) {
+          // Lovable AI supports file uploads
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const b64 = base64Encode(uint8Array);
+          const fileName = filePath.split("/").pop() || "document.pdf";
+          messages.push({
+            role: "user",
+            content: [
+              { type: "file", file: { filename: fileName, file_data: `data:application/pdf;base64,${b64}` } },
+              { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
+            ],
+          });
+        } else {
+          // Third-party providers: extract text from PDF bytes
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let textContent = "";
+          try {
+            const decoder = new TextDecoder("utf-8", { fatal: false });
+            const raw = decoder.decode(uint8Array);
+            // Simple PDF text extraction: pull text between BT/ET or parentheses
+            const textParts: string[] = [];
+            const regex = /\(([^)]{1,500})\)/g;
+            let m;
+            while ((m = regex.exec(raw)) !== null) {
+              const t = m[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1");
+              if (t.trim().length > 1) textParts.push(t.trim());
+            }
+            textContent = textParts.join("\n");
+          } catch (_) { /* ignore */ }
+          
+          if (!textContent || textContent.length < 200) {
+            // Fallback: send raw bytes description  
+            textContent = "[PDF文件无法直接提取文本。请根据文件名和项目名称进行结构分析。]";
+            console.warn("PDF text extraction yielded insufficient text, sending minimal prompt");
+          }
+          
+          const MAX_CHARS = 80000;
+          if (textContent.length > MAX_CHARS) {
+            textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+          }
+          messages.push({
+            role: "user",
+            content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${textContent}`,
+          });
+        }
       } else {
         // DOCX/DOC: extract text content
         let textContent = extractTextFromDocx(arrayBuffer);
@@ -185,9 +220,11 @@ serve(async (req) => {
     if (!response.ok) {
       const status = response.status;
       await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+      const errText = await response.text();
+      console.error("AI gateway error detail:", status, errText);
       if (status === 429) return new Response(JSON.stringify({ error: "AI服务请求过于频繁，请稍后重试" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       if (status === 402) return new Response(JSON.stringify({ error: "AI服务额度不足" }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      throw new Error(`AI gateway error: ${status}`);
+      throw new Error(`AI gateway error: ${status} - ${errText.slice(0, 500)}`);
     }
 
     const data = await response.json();
