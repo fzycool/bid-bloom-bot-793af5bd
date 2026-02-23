@@ -90,7 +90,7 @@ export default function BidComparison() {
       .from("bid_comparisons")
       .insert({
         user_id: user.id,
-        title: title || fileNames.join(" vs "),
+        title: title || `${fileNames.length}文件对比 · ${new Date().toLocaleDateString("zh-CN")}`,
         file_paths: filePaths,
         file_names: fileNames,
       } as any)
@@ -509,16 +509,20 @@ export default function BidComparison() {
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <span className="font-medium text-foreground text-sm">{r.title}</span>
-                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
-                      <span className="whitespace-nowrap">{new Date(r.created_at).toLocaleString("zh-CN")}</span>
-                      <span className="whitespace-nowrap">{r.file_names.length} 个文件</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
+                    <span className="font-medium text-foreground text-sm truncate block">{r.title}</span>
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
                       {r.file_names.map((name, i) => (
-                        <Badge key={i} variant="outline" className="text-[10px]">{name}</Badge>
+                        <span key={i} className="flex items-center gap-1.5 text-xs">
+                          <Badge variant="secondary" className="text-[10px] font-semibold max-w-[180px] truncate">{name}</Badge>
+                          {i < r.file_names.length - 1 && (
+                            <span className="text-accent font-bold text-[11px] px-0.5">VS</span>
+                          )}
+                        </span>
                       ))}
                     </div>
+                    <span className="text-[11px] text-muted-foreground mt-1.5 block">
+                      {new Date(r.created_at).toLocaleString("zh-CN")}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {r.ai_status === "processing" && (
