@@ -20,7 +20,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // 读取活跃模型配置
-    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).single();
+    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
     const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;

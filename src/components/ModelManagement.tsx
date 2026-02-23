@@ -78,7 +78,11 @@ const ModelManagement = () => {
     setSaving(model.id);
     try {
       // 先将所有模型设为不活跃
-      await supabase.from("model_config").update({ is_active: false } as any).neq("id", "");
+      const { error: resetError } = await supabase
+        .from("model_config")
+        .update({ is_active: false } as any)
+        .eq("is_active", true);
+      if (resetError) throw resetError;
       // 激活选中模型
       const { error } = await supabase
         .from("model_config")
