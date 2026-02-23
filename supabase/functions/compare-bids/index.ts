@@ -187,6 +187,7 @@ serve(async (req) => {
 
     // Build message content with all files
     const contentParts: any[] = [];
+    const MAX_TEXT_CHARS = 60000; // Per file limit to stay within token limits
 
     for (let i = 0; i < filePaths.length; i++) {
       const filePath = filePaths[i];
@@ -202,20 +203,38 @@ serve(async (req) => {
       }
 
       const isPdf = filePath.endsWith(".pdf");
+      const isDocx = filePath.endsWith(".docx");
 
       if (isPdf) {
         const arrayBuffer = await fileData.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
         const b64 = base64Encode(uint8Array);
-        contentParts.push({
-          type: "file",
-          file: {
-            filename: fileName,
-            file_data: `data:application/pdf;base64,${b64}`,
-          },
-        });
+        // Check base64 size - skip if too large
+        if (b64.length > 5_000_000) {
+          console.log(`PDF ${fileName} too large (${b64.length} chars base64), extracting as text`);
+          const textContent = await fileData.text();
+          const truncated = textContent.length > MAX_TEXT_CHARS 
+            ? textContent.substring(0, MAX_TEXT_CHARS) + "\n\n[... 文档内容过长，已截断 ...]"
+            : textContent;
+          contentParts.push({
+            type: "text",
+            text: `\n\n=== 文件: ${fileName} ===\n${truncated}`,
+          });
+        } else {
+          contentParts.push({
+            type: "file",
+            file: {
+              filename: fileName,
+              file_data: `data:application/pdf;base64,${b64}`,
+            },
+          });
+        }
       } else {
-        const textContent = await fileData.text();
+        let textContent = await fileData.text();
+        if (textContent.length > MAX_TEXT_CHARS) {
+          console.log(`Text ${fileName} truncated from ${textContent.length} to ${MAX_TEXT_CHARS} chars`);
+          textContent = textContent.substring(0, MAX_TEXT_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+        }
         contentParts.push({
           type: "text",
           text: `\n\n=== 文件: ${fileName} ===\n${textContent}`,
