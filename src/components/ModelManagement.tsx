@@ -1,0 +1,193 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Loader2,
+  Save,
+  CheckCircle,
+  Eye,
+  EyeOff,
+  Bot,
+  Zap,
+} from "lucide-react";
+
+interface ModelConfig {
+  id: string;
+  provider: string;
+  display_name: string;
+  model_name: string;
+  base_url: string;
+  api_key: string | null;
+  is_active: boolean;
+}
+
+const ModelManagement = () => {
+  const { toast } = useToast();
+  const [models, setModels] = useState<ModelConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [editKeys, setEditKeys] = useState<Record<string, string>>({});
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+
+  const fetchModels = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("model_config")
+        .select("*")
+        .order("provider");
+      if (error) throw error;
+      setModels((data as unknown as ModelConfig[]) || []);
+      const keys: Record<string, string> = {};
+      (data as unknown as ModelConfig[])?.forEach((m) => {
+        keys[m.id] = m.api_key || "";
+      });
+      setEditKeys(keys);
+    } catch (err: any) {
+      toast({ title: "加载失败", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchModels();
+  }, []);
+
+  const handleSaveKey = async (model: ModelConfig) => {
+    setSaving(model.id);
+    try {
+      const { error } = await supabase
+        .from("model_config")
+        .update({ api_key: editKeys[model.id] || null } as any)
+        .eq("id", model.id);
+      if (error) throw error;
+      toast({ title: "API Key 已保存" });
+      fetchModels();
+    } catch (err: any) {
+      toast({ title: "保存失败", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleActivate = async (model: ModelConfig) => {
+    setSaving(model.id);
+    try {
+      // 先将所有模型设为不活跃
+      await supabase.from("model_config").update({ is_active: false } as any).neq("id", "");
+      // 激活选中模型
+      const { error } = await supabase
+        .from("model_config")
+        .update({ is_active: true } as any)
+        .eq("id", model.id);
+      if (error) throw error;
+      toast({ title: `已切换至 ${model.display_name}` });
+      fetchModels();
+    } catch (err: any) {
+      toast({ title: "切换失败", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-foreground">模型管理</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          配置AI大模型，支持国产大模型替换。激活的模型将用于所有AI功能。
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {models.map((m) => (
+          <div
+            key={m.id}
+            className={`border rounded-lg p-4 transition-colors ${
+              m.is_active ? "border-accent bg-accent/5" : "border-border"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-muted-foreground" />
+                <span className="font-medium text-foreground text-sm">{m.display_name}</span>
+                {m.is_active && (
+                  <Badge className="text-[10px] bg-accent text-accent-foreground">
+                    <Zap className="w-3 h-3 mr-0.5" />
+                    当前使用
+                  </Badge>
+                )}
+              </div>
+              {!m.is_active && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleActivate(m)}
+                  disabled={saving === m.id || (m.provider !== "lovable" && !editKeys[m.id])}
+                >
+                  {saving === m.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3 mr-1" />}
+                  激活
+                </Button>
+              )}
+            </div>
+
+            <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
+              <div>模型: <code className="bg-muted px-1 py-0.5 rounded">{m.model_name}</code></div>
+              <div className="break-all">接口: <code className="bg-muted px-1 py-0.5 rounded">{m.base_url}</code></div>
+            </div>
+
+            {m.provider !== "lovable" && (
+              <div className="flex items-center gap-2 mt-3">
+                <div className="relative flex-1">
+                  <Input
+                    type={showKeys[m.id] ? "text" : "password"}
+                    placeholder="输入 API Key"
+                    value={editKeys[m.id] || ""}
+                    onChange={(e) => setEditKeys((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                    className="pr-9 text-xs h-8"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeys((prev) => ({ ...prev, [m.id]: !prev[m.id] }))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showKeys[m.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => handleSaveKey(m)}
+                  disabled={saving === m.id}
+                  className="h-8"
+                >
+                  {saving === m.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+                  保存
+                </Button>
+              </div>
+            )}
+
+            {m.provider === "lovable" && (
+              <p className="text-[11px] text-muted-foreground/60 mt-2 italic">
+                内置模型，无需配置 API Key
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default ModelManagement;

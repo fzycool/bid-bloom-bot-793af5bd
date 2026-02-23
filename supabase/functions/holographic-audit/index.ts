@@ -19,6 +19,11 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).single();
+    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
+    const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+
     const { proposalId, filePath, fileType, auditType = "full" } = await req.json();
     if (!proposalId) throw new Error("proposalId is required");
     if (!filePath) throw new Error("请上传终版标书文件");
@@ -185,11 +190,11 @@ ${(resumes || []).map((r: any) => `- 员工ID:${r.employee_id}, 版本:${r.versi
       });
     }
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch(aiUrl, {
       method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "openai/gpt-5.2",
+        model: aiModel,
         messages,
       }),
     });

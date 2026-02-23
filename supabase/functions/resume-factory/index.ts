@@ -19,6 +19,11 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).single();
+    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
+    const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+
     const { action, ...params } = await req.json();
 
     // ---- ACTION: parse-resume (extract structured data from resume text) ----
@@ -48,11 +53,11 @@ serve(async (req) => {
 
           await supabase.from("resume_versions").update({ ai_status: "processing" }).eq("id", resumeVersionId);
 
-          const pdfResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          const pdfResponse = await fetch(aiUrl, {
             method: "POST",
-            headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              model: "openai/gpt-5.2",
+              model: aiModel,
               messages: [
                 {
                   role: "system",
@@ -93,11 +98,11 @@ serve(async (req) => {
 
       await supabase.from("resume_versions").update({ ai_status: "processing" }).eq("id", resumeVersionId);
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch(aiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "openai/gpt-5.2",
+          model: aiModel,
           messages: [
             {
               role: "system",
@@ -257,11 +262,11 @@ serve(async (req) => {
 项目经验: ${JSON.stringify(resume.project_experiences)}
 学历: ${JSON.stringify(resume.education_history)}`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch(aiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "openai/gpt-5.2",
+          model: aiModel,
           messages: [
             { role: "system", content: systemContent },
             { role: "user", content: userContent },
@@ -321,11 +326,11 @@ serve(async (req) => {
 全部人员要求: ${JSON.stringify(bid.personnel_requirements)}\n`;
       }
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch(aiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "openai/gpt-5.2",
+          model: aiModel,
           messages: [
             {
               role: "system",
@@ -405,11 +410,11 @@ ${resume.content || "无"}
       }
 
       // Step 1: Ask AI to extract structured data from all sheets
-      const extractResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const extractResponse = await fetch(aiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "openai/gpt-5.2",
+          model: aiModel,
           messages: [
             {
               role: "system",

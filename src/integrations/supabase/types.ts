@@ -350,6 +350,42 @@ export type Database = {
         }
         Relationships: []
       }
+      model_config: {
+        Row: {
+          api_key: string | null
+          base_url: string
+          created_at: string
+          display_name: string
+          id: string
+          is_active: boolean
+          model_name: string
+          provider: string
+          updated_at: string
+        }
+        Insert: {
+          api_key?: string | null
+          base_url: string
+          created_at?: string
+          display_name: string
+          id?: string
+          is_active?: boolean
+          model_name: string
+          provider: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string | null
+          base_url?: string
+          created_at?: string
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          model_name?: string
+          provider?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null

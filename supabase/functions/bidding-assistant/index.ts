@@ -18,6 +18,11 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).single();
+    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
+    const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+
     const { action, ...params } = await req.json();
 
     // ---- ACTION: generate-outline ----
@@ -122,11 +127,11 @@ ${(docs || []).map((d: any) => `- ${d.file_name} [${d.doc_category || "未分类
 【可用人员】
 ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未知"}, 技能: ${(e.skills || []).join(",")}, 证书: ${(e.certifications || []).join(",")}, ${e.years_of_experience || "?"}年经验`).join("\n")}`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const response = await fetch(aiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "openai/gpt-5.2",
+          model: aiModel,
           messages: [
             { role: "system", content: systemContent },
             { role: "user", content: userContent },

@@ -19,6 +19,12 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // 读取活跃模型配置
+    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).single();
+    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
+    const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+
     // Update status to processing
     await supabase.from("documents").update({ ai_status: "processing" }).eq("id", documentId);
 
@@ -29,14 +35,14 @@ doc_category 必须是以下之一：招标文件、投标文件、资质证书�
 industry 示例：信息技术、建筑工程、医疗卫生、教育、交通、金融、政务、能源等
 amount_range 示例：100万以下、100-500万、500-1000万、1000万-5000万、5000万以上`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch(aiUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${aiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5.2",
+        model: aiModel,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `文件名: ${fileName}\n文件类型: ${fileType}` },

@@ -20,7 +20,7 @@ import BidParser from "@/components/BidParser";
 import ResumeFactory from "@/components/ResumeFactory";
 import BiddingAssistant from "@/components/BiddingAssistant";
 import HolographicAudit from "@/components/HolographicAudit";
-import UserManagement from "@/components/UserManagement";
+import BackendManagement from "@/components/BackendManagement";
 import BidComparison from "@/components/BidComparison";
 
 const baseModules = [
@@ -39,7 +39,7 @@ const Dashboard = () => {
 
   const modules = [
     ...baseModules,
-    ...(isAdmin ? [{ id: "users", label: "用户管理", icon: UserCog }] : []),
+    ...(isAdmin ? [{ id: "admin", label: "后台管理", icon: UserCog }] : []),
   ];
 
   // Show pending approval screen for unapproved users
@@ -132,7 +132,7 @@ const Dashboard = () => {
           {activeModule === "resume" && <ResumeFactory />}
           {activeModule === "bid" && <BiddingAssistant />}
           {activeModule === "audit" && <HolographicAudit />}
-          {activeModule === "users" && isAdmin && <UserManagement />}
+          {activeModule === "admin" && isAdmin && <BackendManagement />}
         </main>
       </div>
     </div>
