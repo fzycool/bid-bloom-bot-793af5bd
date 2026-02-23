@@ -161,6 +161,15 @@ serve(async (req) => {
     const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+    const isLovable = !modelConfig || modelConfig.provider === "lovable";
+
+    function sanitizeTools(tools: any[]) {
+      if (isLovable) return tools;
+      return JSON.parse(JSON.stringify(tools), (key, value) => {
+        if (key === "additionalProperties" || key === "nullable") return undefined;
+        return value;
+      });
+    }
 
     await supabase.from("bid_analyses").update({ ai_status: "processing" }).eq("id", analysisId);
 
@@ -227,18 +236,24 @@ serve(async (req) => {
       });
     }
 
+    const requestBody: any = {
+      model: aiModel,
+      messages,
+      tools: sanitizeTools(ANALYSIS_TOOLS),
+    };
+    if (isLovable) {
+      requestBody.tool_choice = { type: "function", function: { name: "analyze_bid_document" } };
+    } else {
+      requestBody.tool_choice = "auto";
+    }
+
     const response = await fetch(aiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${aiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: aiModel,
-        messages,
-        tools: ANALYSIS_TOOLS,
-        tool_choice: { type: "function", function: { name: "analyze_bid_document" } },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {

@@ -24,6 +24,15 @@ serve(async (req) => {
     const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+    const isLovable = !modelConfig || modelConfig.provider === "lovable";
+
+    function sanitizeTools(tools: any[]) {
+      if (isLovable) return tools;
+      return JSON.parse(JSON.stringify(tools), (key, value) => {
+        if (key === "additionalProperties" || key === "nullable") return undefined;
+        return value;
+      });
+    }
 
     // Update status to processing
     await supabase.from("documents").update({ ai_status: "processing" }).eq("id", documentId);
@@ -35,41 +44,49 @@ doc_category 必须是以下之一：招标文件、投标文件、资质证书�
 industry 示例：信息技术、建筑工程、医疗卫生、教育、交通、金融、政务、能源等
 amount_range 示例：100万以下、100-500万、500-1000万、1000万-5000万、5000万以上`;
 
+    const classifyTools = [{
+      type: "function",
+      function: {
+        name: "classify_document",
+        description: "对招投标文档进行分类标注",
+        parameters: {
+          type: "object",
+          properties: {
+            doc_category: { type: "string", description: "文档类别" },
+            industry: { type: "string", description: "行业分类" },
+            owner_name: { type: "string", description: "业主/甲方名称" },
+            doc_year: { type: "integer", description: "文档年份" },
+            amount_range: { type: "string", description: "金额范围" },
+            tags: { type: "array", items: { type: "string" }, description: "额外标签" },
+            summary: { type: "string", description: "文档简要描述" },
+          },
+          required: ["doc_category", "tags", "summary"],
+          ...(isLovable ? { additionalProperties: false } : {}),
+        },
+      },
+    }];
+
+    const requestBody: any = {
+      model: aiModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `文件名: ${fileName}\n文件类型: ${fileType}` },
+      ],
+      tools: classifyTools,
+    };
+    if (isLovable) {
+      requestBody.tool_choice = { type: "function", function: { name: "classify_document" } };
+    } else {
+      requestBody.tool_choice = "auto";
+    }
+
     const response = await fetch(aiUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${aiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: aiModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `文件名: ${fileName}\n文件类型: ${fileType}` },
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "classify_document",
-            description: "对招投标文档进行分类标注",
-            parameters: {
-              type: "object",
-              properties: {
-                doc_category: { type: "string", description: "文档类别" },
-                industry: { type: "string", nullable: true, description: "行业分类" },
-                owner_name: { type: "string", nullable: true, description: "业主/甲方名称" },
-                doc_year: { type: "integer", nullable: true, description: "文档年份" },
-                amount_range: { type: "string", nullable: true, description: "金额范围" },
-                tags: { type: "array", items: { type: "string" }, description: "额外标签" },
-                summary: { type: "string", description: "文档简要描述" },
-              },
-              required: ["doc_category", "tags", "summary"],
-              additionalProperties: false,
-            },
-          },
-        }],
-        tool_choice: { type: "function", function: { name: "classify_document" } },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
