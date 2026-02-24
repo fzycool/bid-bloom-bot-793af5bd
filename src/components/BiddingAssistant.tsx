@@ -482,7 +482,7 @@ export default function BiddingAssistant() {
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-medium flex-1 break-words line-clamp-2">{p.project_name}</span>
+                          <span className="font-medium flex-1 break-words whitespace-normal">{p.project_name}</span>
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
                             className="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive"
