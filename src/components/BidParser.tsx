@@ -1220,7 +1220,7 @@ export default function BidParser() {
             <Card
               key={a.id}
               className="hover:shadow-card-hover transition-shadow cursor-pointer"
-              onClick={() => (a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed" || a.ai_status === "paused" || a.ai_status === "paused_structure" || a.ai_status === "cancelled") && setSelectedAnalysis(a)}
+              onClick={() => (a.ai_status !== "pending" && a.ai_status !== "analyzing_structure") && setSelectedAnalysis(a)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
