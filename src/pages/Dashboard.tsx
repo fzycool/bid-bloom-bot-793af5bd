@@ -124,7 +124,7 @@ const Dashboard = () => {
         </div>
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto p-6 md:p-8">
+        <main className="flex-1 min-h-0 overflow-auto p-6 md:p-8">
           {activeModule === "overview" && <DashboardOverview />}
           {activeModule === "knowledge" && <KnowledgeBase />}
           {activeModule === "parse" && <BidParser />}
