@@ -273,6 +273,7 @@ export default function BidParser() {
   const handleDetailParse = async () => {
     if (!selectedAnalysis || !user) return;
     setDetailParsing(true);
+    setTokenUsage(null);
 
     try {
       const body: any = {
@@ -292,18 +293,18 @@ export default function BidParser() {
         }
       }
 
-      await supabase.from("bid_analyses").update({ ai_status: "processing" } as any).eq("id", selectedAnalysis.id);
+      await supabase.from("bid_analyses").update({ ai_status: "processing", token_usage: null } as any).eq("id", selectedAnalysis.id);
       setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing" } : prev);
       startTokenPolling(selectedAnalysis.id);
 
       const { data: respData, error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
       stopTokenPolling();
       if (fnErr) throw fnErr;
-      if (respData?.usage) setTokenUsage((prev) => ({
-        prompt_tokens: (prev?.prompt_tokens || 0) + (respData.usage.prompt_tokens || 0),
-        completion_tokens: (prev?.completion_tokens || 0) + (respData.usage.completion_tokens || 0),
-        total_tokens: (prev?.total_tokens || 0) + (respData.usage.total_tokens || 0),
-      }));
+      if (respData?.usage) setTokenUsage({
+        prompt_tokens: respData.usage.prompt_tokens || 0,
+        completion_tokens: respData.usage.completion_tokens || 0,
+        total_tokens: respData.usage.total_tokens || 0,
+      });
 
       toast({ title: "详细解析完成" });
 
