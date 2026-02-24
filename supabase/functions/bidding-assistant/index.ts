@@ -51,7 +51,7 @@ serve(async (req) => {
         .select("id, name, current_position, skills, certifications, years_of_experience")
         .eq("user_id", bid.user_id);
 
-      await supabase.from("bid_proposals").update({ ai_status: "processing" }).eq("id", proposalId);
+      await supabase.from("bid_proposals").update({ ai_status: "processing", ai_progress: "正在准备数据...", token_usage: null } as any).eq("id", proposalId);
 
       let systemContent = `你是资深投标专家，擅长根据招标文件编制高质量投标文件。请根据以下招标解析结果，生成完整的投标文件应答提纲。
 
@@ -128,6 +128,8 @@ ${(docs || []).map((d: any) => `- ${d.file_name} [${d.doc_category || "未分类
 【可用人员】
 ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未知"}, 技能: ${(e.skills || []).join(",")}, 证书: ${(e.certifications || []).join(",")}, ${e.years_of_experience || "?"}年经验`).join("\n")}`;
 
+      await supabase.from("bid_proposals").update({ ai_progress: "正在调用AI生成提纲..." } as any).eq("id", proposalId);
+
       const requestBody: any = {
         model: aiModel,
         messages: [
@@ -157,6 +159,18 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       }
 
       const data = await response.json();
+
+      // Extract and save token usage immediately
+      const usage = data.usage;
+      if (usage) {
+        await supabase.from("bid_proposals").update({
+          ai_progress: "AI生成完成，正在解析结果...",
+          token_usage: { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 },
+        } as any).eq("id", proposalId);
+      } else {
+        await supabase.from("bid_proposals").update({ ai_progress: "AI生成完成，正在解析结果..." } as any).eq("id", proposalId);
+      }
+
       let resultText = data.choices?.[0]?.message?.content || "";
       resultText = resultText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
@@ -206,11 +220,14 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
         }
       }
 
+      await supabase.from("bid_proposals").update({ ai_progress: "正在保存提纲结构..." } as any).eq("id", proposalId);
+
       // Save outline content
       await supabase.from("bid_proposals").update({
         outline_content: JSON.stringify(result),
         ai_status: "completed",
-      }).eq("id", proposalId);
+        ai_progress: null,
+      } as any).eq("id", proposalId);
 
       // Save sections to proposal_sections table
       if (result.outline) {
