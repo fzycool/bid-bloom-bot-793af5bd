@@ -105,6 +105,7 @@ async function processOutline(supabase: any, opts: {
 }) {
   const { proposalId, bidAnalysisId, customPrompt, aiUrl, aiModel, aiKey, isLovable } = opts;
 
+  try {
   // Fetch bid analysis data
   const { data: bid } = await supabase
     .from("bid_analyses")
@@ -172,7 +173,7 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       { role: "user", content: userContent },
     ],
   };
-  if (isLovable) requestBody.max_tokens = 32000;
+  requestBody.max_tokens = isLovable ? 32000 : 16000;
 
   const response = await fetch(aiUrl, {
     method: "POST",
@@ -317,4 +318,12 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
   } as any).eq("id", proposalId);
 
   console.log("Outline generation completed for proposal:", proposalId);
+
+  } catch (err) {
+    console.error("processOutline fatal error:", err);
+    await supabase.from("bid_proposals").update({
+      ai_status: "failed",
+      ai_progress: `处理异常: ${err instanceof Error ? err.message : "未知错误"}`,
+    } as any).eq("id", proposalId);
+  }
 }
