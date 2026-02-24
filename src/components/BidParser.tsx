@@ -306,15 +306,37 @@ export default function BidParser() {
       }));
 
       toast({ title: "详细解析完成" });
-      // Immediately refetch fresh data and update UI
-      const { data: updated } = await supabase.from("bid_analyses").select("*").eq("id", selectedAnalysis.id).single();
-      if (updated) {
-        setSelectedAnalysis(updated as unknown as BidAnalysis);
+
+      // If edge function returned parsed result, use it to update local state immediately
+      if (respData?.result) {
+        setSelectedAnalysis((prev) => prev ? {
+          ...prev,
+          ai_status: "completed",
+          scoring_table: respData.result.scoring_table || [],
+          disqualification_items: respData.result.disqualification_items || [],
+          trap_items: respData.result.trap_items || [],
+          conflict_items: respData.result.conflict_items || [],
+          technical_keywords: respData.result.technical_keywords || [],
+          business_keywords: respData.result.business_keywords || [],
+          responsibility_keywords: respData.result.responsibility_keywords || [],
+          personnel_requirements: respData.result.personnel_requirements || [],
+          summary: respData.result.summary || "",
+          risk_score: respData.result.risk_score ?? 50,
+          bid_deadline: respData.result.bid_deadline || prev.bid_deadline,
+          bid_location: respData.result.bid_location || prev.bid_location,
+          requires_presentation: respData.result.requires_presentation ?? prev.requires_presentation,
+          deposit_amount: respData.result.deposit_amount || prev.deposit_amount,
+        } : prev);
       } else {
-        // Fallback: optimistically set status to completed so UI transitions
+        // Fallback: force completed status
         setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "completed" } : prev);
       }
-      await fetchAnalyses();
+
+      // Also refresh from DB in background
+      fetchAnalyses().then(async () => {
+        const { data: updated } = await supabase.from("bid_analyses").select("*").eq("id", selectedAnalysis.id).single();
+        if (updated) setSelectedAnalysis(updated as unknown as BidAnalysis);
+      });
     } catch (err: any) {
       toast({ title: "详细解析失败", description: err.message, variant: "destructive" });
       await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);

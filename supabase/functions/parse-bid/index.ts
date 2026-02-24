@@ -425,12 +425,45 @@ serve(async (req) => {
         ai_status: "completed",
       };
       if (tokenData) updateData.token_usage = tokenData;
-      if (result.bid_deadline) updateData.bid_deadline = result.bid_deadline;
       if (result.bid_location) updateData.bid_location = result.bid_location;
       if (result.requires_presentation !== undefined && result.requires_presentation !== null) updateData.requires_presentation = result.requires_presentation;
       if (result.deposit_amount) updateData.deposit_amount = result.deposit_amount;
 
-      await supabase.from("bid_analyses").update(updateData).eq("id", analysisId);
+      // Validate bid_deadline format before including it
+      if (result.bid_deadline) {
+        try {
+          const d = new Date(result.bid_deadline);
+          if (!isNaN(d.getTime())) {
+            updateData.bid_deadline = d.toISOString();
+          } else {
+            console.warn("Invalid bid_deadline skipped:", result.bid_deadline);
+          }
+        } catch (_) {
+          console.warn("bid_deadline parse error, skipped:", result.bid_deadline);
+        }
+      }
+
+      const { error: updateErr } = await supabase.from("bid_analyses").update(updateData).eq("id", analysisId);
+      if (updateErr) {
+        console.error("DB update failed:", updateErr.message, "Retrying without optional fields...");
+        // Retry with only core fields
+        const coreUpdate: any = {
+          scoring_table: updateData.scoring_table,
+          disqualification_items: updateData.disqualification_items,
+          trap_items: updateData.trap_items,
+          conflict_items: updateData.conflict_items,
+          technical_keywords: updateData.technical_keywords,
+          business_keywords: updateData.business_keywords,
+          responsibility_keywords: updateData.responsibility_keywords,
+          personnel_requirements: updateData.personnel_requirements,
+          summary: updateData.summary,
+          risk_score: updateData.risk_score,
+          ai_status: "completed",
+        };
+        if (tokenData) coreUpdate.token_usage = tokenData;
+        const { error: retryErr } = await supabase.from("bid_analyses").update(coreUpdate).eq("id", analysisId);
+        if (retryErr) console.error("DB retry also failed:", retryErr.message);
+      }
 
       return new Response(JSON.stringify({ success: true, result, usage }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
