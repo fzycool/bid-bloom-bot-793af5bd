@@ -158,7 +158,7 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       };
       // Only set max_tokens for Lovable gateway (other providers may reject it)
       if (isLovable) {
-        requestBody.max_tokens = 16000;
+        requestBody.max_tokens = 32000;
       }
 
       const response = await fetch(aiUrl, {
@@ -209,11 +209,20 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
           }
           if (inString) repaired += '"';
           
-          // Remove trailing incomplete entries (after closing the string)
-          repaired = repaired.replace(/,\s*"[^"]*":\s*"[^"]*"?\s*$/g, "");
-          repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*$/g, "");
-          repaired = repaired.replace(/,\s*{\s*"[^"]*"\s*:\s*"[^"]*"?\s*$/g, "");
-          repaired = repaired.replace(/,\s*$/g, "");
+          // Aggressively trim trailing incomplete structures
+          // Remove incomplete key-value pairs, partial objects, etc.
+          for (let attempt = 0; attempt < 10; attempt++) {
+            const before = repaired;
+            // Remove trailing incomplete value after colon
+            repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*"[^"]*"?\s*$/g, "");
+            repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*$/g, "");
+            repaired = repaired.replace(/,\s*"[^"]*"\s*$/g, "");
+            // Remove incomplete object at end of array
+            repaired = repaired.replace(/,\s*\{\s*("[^"]*"\s*:\s*("[^"]*"|[^,}\]]*)\s*,?\s*)*$/g, "");
+            // Remove trailing comma
+            repaired = repaired.replace(/,\s*$/g, "");
+            if (repaired === before) break;
+          }
           
           // Clean trailing commas before closers
           repaired = repaired.replace(/,\s*}/g, "}");
@@ -233,9 +242,20 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
           result = JSON.parse(repaired);
           console.log("Successfully repaired truncated AI JSON response");
         } catch (repairErr) {
-          console.error("Failed to parse AI response even after repair:", resultText.slice(-300));
-          await supabase.from("bid_proposals").update({ ai_status: "failed" }).eq("id", proposalId);
-          throw new Error("AI返回格式异常");
+          // Last resort: try to extract just the outline portion
+          try {
+            const outlineMatch = resultText.match(/"outline"\s*:\s*(\[[\s\S]*?\])\s*,\s*"/);
+            if (outlineMatch) {
+              result = { outline: JSON.parse(outlineMatch[1]), material_checklist: [], personnel_plan: [] };
+              console.log("Recovered outline from truncated response");
+            } else {
+              throw repairErr;
+            }
+          } catch {
+            console.error("Failed to parse AI response even after repair:", resultText.slice(-300));
+            await supabase.from("bid_proposals").update({ ai_status: "failed" }).eq("id", proposalId);
+            throw new Error("AI返回格式异常，请重试");
+          }
         }
       }
 
