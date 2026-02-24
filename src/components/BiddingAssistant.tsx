@@ -248,6 +248,52 @@ export default function BiddingAssistant() {
     }
   };
 
+  const handleRegenerate = async (proposal: Proposal) => {
+    if (!proposal.bid_analysis_id) {
+      toast({ title: "无法重新生成", description: "缺少关联的招标解析", variant: "destructive" });
+      return;
+    }
+    setGenerating(true);
+    try {
+      // Clear old sections & materials
+      await Promise.all([
+        supabase.from("proposal_sections").delete().eq("proposal_id", proposal.id),
+        supabase.from("proposal_materials").delete().eq("proposal_id", proposal.id),
+      ]);
+
+      // Reset status
+      await supabase.from("bid_proposals").update({
+        ai_status: "processing",
+        ai_progress: "正在准备数据...",
+        outline_content: null,
+        token_usage: null,
+      } as any).eq("id", proposal.id);
+
+      const updated = { ...proposal, ai_status: "processing", ai_progress: "正在准备数据...", outline_content: null, token_usage: null };
+      setSelectedProposal(updated);
+      setSections([]);
+      setMaterials([]);
+      fetchProposals();
+
+      supabase.functions.invoke("bidding-assistant", {
+        body: {
+          action: "generate-outline",
+          proposalId: proposal.id,
+          bidAnalysisId: proposal.bid_analysis_id,
+          customPrompt: proposal.custom_prompt || undefined,
+        },
+      }).then(({ error: fnErr }) => {
+        if (fnErr) toast({ title: "生成失败", description: fnErr.message, variant: "destructive" });
+      });
+
+      toast({ title: "重新生成中", description: "请等待AI生成完成..." });
+    } catch (e: any) {
+      toast({ title: "重新生成失败", description: e.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     await supabase.from("bid_proposals").delete().eq("id", id);
     if (selectedProposal?.id === id) {
@@ -528,6 +574,19 @@ export default function BiddingAssistant() {
                     <span className="font-medium text-foreground">Total: {formatTokenCount(selectedProposal.token_usage.total_tokens)}</span>
                   </div>
                 )}
+              </div>
+            </Card>
+          ) : selectedProposal.ai_status === "failed" ? (
+            <Card className="flex items-center justify-center py-20">
+              <div className="text-center space-y-4">
+                <XCircle className="w-10 h-10 mx-auto text-destructive opacity-60" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">提纲生成失败</p>
+                  <p className="text-xs text-muted-foreground mt-1">{selectedProposal.ai_progress || "未知错误"}</p>
+                </div>
+                <Button onClick={() => handleRegenerate(selectedProposal)} disabled={generating}>
+                  {generating ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />重新生成中...</> : <><RefreshCw className="w-4 h-4 mr-1" />重新生成</>}
+                </Button>
               </div>
             </Card>
           ) : (
