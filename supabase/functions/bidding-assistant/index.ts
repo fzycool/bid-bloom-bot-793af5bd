@@ -133,6 +133,7 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
         headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: aiModel,
+          max_tokens: 16000,
           messages: [
             { role: "system", content: systemContent },
             { role: "user", content: userContent },
@@ -158,15 +159,25 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       } catch {
         // Attempt to repair truncated JSON
         try {
-          let repaired = resultText
-            .replace(/,\s*}/g, "}")
-            .replace(/,\s*]/g, "]")
-            .replace(/[\x00-\x1F\x7F]/g, "");
+          let repaired = resultText;
           
-          // Remove trailing incomplete key-value pair
-          repaired = repaired.replace(/,\s*"[^"]*":\s*("(?:[^"\\]|\\.)*)?$/g, "");
-          repaired = repaired.replace(/,\s*"[^"]*":\s*\[?\s*$/g, "");
-          repaired = repaired.replace(/,\s*{\s*"[^"]*":\s*("(?:[^"\\]|\\.)*)?$/g, "");
+          // Close any unclosed string: count unescaped quotes
+          let inString = false;
+          for (let i = 0; i < repaired.length; i++) {
+            if (repaired[i] === '\\' && inString) { i++; continue; }
+            if (repaired[i] === '"') inString = !inString;
+          }
+          if (inString) repaired += '"';
+          
+          // Remove trailing incomplete entries (after closing the string)
+          repaired = repaired.replace(/,\s*"[^"]*":\s*"[^"]*"?\s*$/g, "");
+          repaired = repaired.replace(/,\s*"[^"]*"\s*:\s*$/g, "");
+          repaired = repaired.replace(/,\s*{\s*"[^"]*"\s*:\s*"[^"]*"?\s*$/g, "");
+          repaired = repaired.replace(/,\s*$/g, "");
+          
+          // Clean trailing commas before closers
+          repaired = repaired.replace(/,\s*}/g, "}");
+          repaired = repaired.replace(/,\s*]/g, "]");
           
           // Balance braces and brackets
           let braces = 0, brackets = 0;
@@ -182,7 +193,7 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
           result = JSON.parse(repaired);
           console.log("Successfully repaired truncated AI JSON response");
         } catch (repairErr) {
-          console.error("Failed to parse AI response even after repair:", resultText.slice(-200));
+          console.error("Failed to parse AI response even after repair:", resultText.slice(-300));
           await supabase.from("bid_proposals").update({ ai_status: "failed" }).eq("id", proposalId);
           throw new Error("AI返回格式异常");
         }
