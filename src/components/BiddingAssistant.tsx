@@ -98,6 +98,7 @@ export default function BiddingAssistant() {
   const [checking, setChecking] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [uploadingMaterialId, setUploadingMaterialId] = useState<string | null>(null);
+  const [expandedFormats, setExpandedFormats] = useState<Set<string>>(new Set());
   const fetchAnalyses = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
@@ -598,7 +599,7 @@ export default function BiddingAssistant() {
                   </Button>
                 </div>
 
-                {/* Hard requirements - grouped by format */}
+                {/* Hard requirements - grouped by format, collapsible */}
                 {hardMissing.length > 0 && (
                   <Card className="border-destructive/30">
                     <CardHeader className="pb-2">
@@ -606,23 +607,40 @@ export default function BiddingAssistant() {
                         <XCircle className="w-4 h-4" /> 硬性要求 - 缺失材料（必须补全）
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      {groupMaterialsByFormat(hardMissing).map(([format, items]) => (
-                        <div key={format}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant="outline" className="text-xs font-medium">{format}</Badge>
-                            <span className="text-xs text-muted-foreground">共 {items.length} 项</span>
+                    <CardContent className="space-y-2">
+                      {groupMaterialsByFormat(hardMissing).map(([format, items]) => {
+                        const formatKey = `hard-${format}`;
+                        const isOpen = expandedFormats.has(formatKey);
+                        const uploadedCount = items.filter(i => i.status === "uploaded").length;
+                        return (
+                          <div key={format} className="rounded-lg border border-border/60 overflow-hidden">
+                            <button
+                              onClick={() => setExpandedFormats(prev => {
+                                const next = new Set(prev);
+                                next.has(formatKey) ? next.delete(formatKey) : next.add(formatKey);
+                                return next;
+                              })}
+                              className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/50 transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                                <span className="text-sm font-medium text-foreground">{format}</span>
+                                <Badge variant="outline" className="text-[10px]">{uploadedCount}/{items.length} 已上传</Badge>
+                              </div>
+                            </button>
+                            {isOpen && (
+                              <div className="px-4 pb-3 space-y-2 border-t border-border/40">
+                                {items.map((m) => renderMaterialItem(m, <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />, "bg-destructive/5"))}
+                              </div>
+                            )}
                           </div>
-                          <div className="space-y-2 ml-2 border-l-2 border-destructive/20 pl-3">
-                            {items.map((m) => renderMaterialItem(m, <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />, "bg-destructive/5"))}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Soft requirements - grouped by format */}
+                {/* Soft requirements - grouped by format, collapsible */}
                 {softMissing.length > 0 && (
                   <Card className="border-yellow-500/30">
                     <CardHeader className="pb-2">
@@ -630,23 +648,40 @@ export default function BiddingAssistant() {
                         <AlertTriangle className="w-4 h-4" /> 软性要求 - 建议补充
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      {groupMaterialsByFormat(softMissing).map(([format, items]) => (
-                        <div key={format}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant="outline" className="text-xs font-medium">{format}</Badge>
-                            <span className="text-xs text-muted-foreground">共 {items.length} 项</span>
+                    <CardContent className="space-y-2">
+                      {groupMaterialsByFormat(softMissing).map(([format, items]) => {
+                        const formatKey = `soft-${format}`;
+                        const isOpen = expandedFormats.has(formatKey);
+                        const uploadedCount = items.filter(i => i.status === "uploaded").length;
+                        return (
+                          <div key={format} className="rounded-lg border border-border/60 overflow-hidden">
+                            <button
+                              onClick={() => setExpandedFormats(prev => {
+                                const next = new Set(prev);
+                                next.has(formatKey) ? next.delete(formatKey) : next.add(formatKey);
+                                return next;
+                              })}
+                              className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/50 transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                                <span className="text-sm font-medium text-foreground">{format}</span>
+                                <Badge variant="outline" className="text-[10px]">{uploadedCount}/{items.length} 已上传</Badge>
+                              </div>
+                            </button>
+                            {isOpen && (
+                              <div className="px-4 pb-3 space-y-2 border-t border-border/40">
+                                {items.map((m) => renderMaterialItem(m, <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />, "bg-yellow-500/5"))}
+                              </div>
+                            )}
                           </div>
-                          <div className="space-y-2 ml-2 border-l-2 border-yellow-500/20 pl-3">
-                            {items.map((m) => renderMaterialItem(m, <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />, "bg-yellow-500/5"))}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Matched/Uploaded - grouped by format */}
+                {/* Matched/Uploaded - grouped by format, collapsible */}
                 {matched.length > 0 && (
                   <Card>
                     <CardHeader className="pb-2">
@@ -654,18 +689,34 @@ export default function BiddingAssistant() {
                         <CheckCircle className="w-4 h-4" /> 已匹配/已上传材料
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      {groupMaterialsByFormat(matched).map(([format, items]) => (
-                        <div key={format}>
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant="outline" className="text-xs font-medium">{format}</Badge>
-                            <span className="text-xs text-muted-foreground">共 {items.length} 项</span>
+                    <CardContent className="space-y-2">
+                      {groupMaterialsByFormat(matched).map(([format, items]) => {
+                        const formatKey = `matched-${format}`;
+                        const isOpen = expandedFormats.has(formatKey);
+                        return (
+                          <div key={format} className="rounded-lg border border-border/60 overflow-hidden">
+                            <button
+                              onClick={() => setExpandedFormats(prev => {
+                                const next = new Set(prev);
+                                next.has(formatKey) ? next.delete(formatKey) : next.add(formatKey);
+                                return next;
+                              })}
+                              className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/50 transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                                <span className="text-sm font-medium text-foreground">{format}</span>
+                                <Badge variant="default" className="text-[10px]">{items.length} 项已完成</Badge>
+                              </div>
+                            </button>
+                            {isOpen && (
+                              <div className="px-4 pb-3 space-y-2 border-t border-border/40">
+                                {items.map((m) => renderMaterialItem(m, <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />, "bg-green-500/5"))}
+                              </div>
+                            )}
                           </div>
-                          <div className="space-y-2 ml-2 border-l-2 border-green-500/20 pl-3">
-                            {items.map((m) => renderMaterialItem(m, <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />, "bg-green-500/5"))}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </CardContent>
                   </Card>
                 )}
