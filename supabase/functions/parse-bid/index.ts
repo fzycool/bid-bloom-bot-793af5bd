@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { unzipSync } from "npm:fflate@0.8.2";
+import * as XLSX from "npm:xlsx@0.18.5";
 
 function extractTextFromDocx(arrayBuffer: ArrayBuffer): string {
   const uint8 = new Uint8Array(arrayBuffer);
@@ -11,6 +12,19 @@ function extractTextFromDocx(arrayBuffer: ArrayBuffer): string {
   const xmlStr = new TextDecoder().decode(docXml);
   const text = xmlStr.replace(/<w:p[^>]*>/g, "\n").replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1").replace(/<[^>]+>/g, "");
   return text.trim();
+}
+
+function extractTextFromExcel(arrayBuffer: ArrayBuffer): string {
+  const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+  const parts: string[] = [];
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    parts.push(`【Sheet: ${sheetName}】`);
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+    parts.push(csv);
+    parts.push("");
+  }
+  return parts.join("\n").trim();
 }
 
 const corsHeaders = {
@@ -189,8 +203,23 @@ serve(async (req) => {
 
       const arrayBuffer = await fileData.arrayBuffer();
       const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
+      const isExcel = filePath.endsWith(".xlsx") || filePath.endsWith(".xls") || fileType?.includes("spreadsheet") || fileType?.includes("excel");
 
-      if (isPdf) {
+      if (isExcel) {
+        let textContent = extractTextFromExcel(arrayBuffer);
+        if (!textContent) {
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          throw new Error("无法从Excel文件中提取内容");
+        }
+        const MAX_CHARS = 120000;
+        if (textContent.length > MAX_CHARS) {
+          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+        }
+        messages.push({
+          role: "user",
+          content: `项目名称: ${projectName || "未知"}\n\n以下是从Excel招标文件中提取的内容，请仔细分析并提取所有关键信息：\n\n${textContent}`,
+        });
+      } else if (isPdf) {
         if (isLovable) {
           const uint8Array = new Uint8Array(arrayBuffer);
           const b64 = base64Encode(uint8Array);

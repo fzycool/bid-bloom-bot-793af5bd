@@ -142,7 +142,7 @@ export default function BidParser() {
           continue;
         }
 
-        const name = projectName || file.name.replace(/\.(pdf|docx?|txt)$/i, "");
+        const name = projectName || file.name.replace(/\.(pdf|docx?|xlsx?|txt)$/i, "");
         const { data: analysis, error: insertErr } = await supabase
           .from("bid_analyses")
           .insert({ user_id: user.id, project_name: name, custom_prompt: customPrompt.trim() || null, file_path: storagePath } as any)
@@ -1061,7 +1061,7 @@ export default function BidParser() {
                   ref={fileInputRef}
                   type="file"
                   className="hidden"
-                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  accept=".pdf,.doc,.docx,.xlsx,.xls,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                   multiple
                   onChange={(e) => {
                     const files = e.target.files;
@@ -1069,7 +1069,7 @@ export default function BidParser() {
                       const fileArray = Array.from(files);
                       setUploadedFiles((prev) => [...prev, ...fileArray]);
                       if (!projectName && fileArray.length === 1) {
-                        setProjectName(fileArray[0].name.replace(/\.(pdf|docx?|txt)$/i, ""));
+                        setProjectName(fileArray[0].name.replace(/\.(pdf|docx?|xlsx?|txt)$/i, ""));
                       }
                     }
                     // Reset after a short delay to avoid clearing file references
@@ -1112,7 +1112,7 @@ export default function BidParser() {
                     <>
                       <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
                       <p className="text-sm font-medium text-foreground">点击上传招标文件</p>
-                      <p className="text-xs text-muted-foreground mt-1">支持 PDF、Word 格式，可选择多个文件，最大 20MB/个</p>
+                      <p className="text-xs text-muted-foreground mt-1">支持 PDF、Word、Excel 格式，可选择多个文件，最大 20MB/个</p>
                     </>
                   )}
                 </div>
