@@ -128,22 +128,29 @@ ${(docs || []).map((d: any) => `- ${d.file_name} [${d.doc_category || "未分类
 【可用人员】
 ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未知"}, 技能: ${(e.skills || []).join(",")}, 证书: ${(e.certifications || []).join(",")}, ${e.years_of_experience || "?"}年经验`).join("\n")}`;
 
+      const requestBody: any = {
+        model: aiModel,
+        messages: [
+          { role: "system", content: systemContent },
+          { role: "user", content: userContent },
+        ],
+      };
+      // Only set max_tokens for Lovable gateway (other providers may reject it)
+      if (isLovable) {
+        requestBody.max_tokens = 16000;
+      }
+
       const response = await fetch(aiUrl, {
         method: "POST",
         headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: aiModel,
-          max_tokens: 16000,
-          messages: [
-            { role: "system", content: systemContent },
-            { role: "user", content: userContent },
-          ],
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
         await supabase.from("bid_proposals").update({ ai_status: "failed" }).eq("id", proposalId);
         const status = response.status;
+        const errBody = await response.text();
+        console.error("AI API error:", status, errBody);
         if (status === 429) return new Response(JSON.stringify({ error: "AI服务请求过于频繁" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         if (status === 402) return new Response(JSON.stringify({ error: "AI服务额度不足" }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         throw new Error(`AI error: ${status}`);
