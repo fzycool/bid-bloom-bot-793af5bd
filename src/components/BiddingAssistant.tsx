@@ -13,8 +13,27 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, FileText, CheckCircle, AlertTriangle, XCircle,
   RefreshCw, Users, ChevronRight, ChevronDown, Loader2,
-  ClipboardCheck, Trash2, Search, Sparkles,
+  ClipboardCheck, Trash2, Search, Sparkles, Download,
 } from "lucide-react";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
+import { saveAs } from "file-saver";
+
+function flattenSections(sections: ProposalSection[], depth = 0): { section: ProposalSection; depth: number }[] {
+  const result: { section: ProposalSection; depth: number }[] = [];
+  for (const s of sections) {
+    result.push({ section: s, depth });
+    if (s.children?.length) result.push(...flattenSections(s.children, depth + 1));
+  }
+  return result;
+}
+
+function formatTokenCount(count: number | undefined | null): string {
+  if (count == null) return "0";
+  if (count >= 1_000_000_000) return (count / 1_000_000_000).toFixed(1) + "B";
+  if (count >= 1_000_000) return (count / 1_000_000).toFixed(1) + "M";
+  if (count >= 1_000) return (count / 1_000).toFixed(1) + "K";
+  return String(count);
+}
 
 interface BidAnalysis {
   id: string;
@@ -238,6 +257,61 @@ export default function BiddingAssistant() {
     });
   };
 
+  const handleExportWord = async () => {
+    if (!selectedProposal) return;
+    const flatSections = flattenSections(sections);
+    const children: Paragraph[] = [
+      new Paragraph({
+        text: selectedProposal.project_name,
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+      }),
+      new Paragraph({ text: "" }),
+    ];
+
+    if (parsedOutline?.overall_strategy) {
+      children.push(
+        new Paragraph({ text: "投标策略建议", heading: HeadingLevel.HEADING_1 }),
+        new Paragraph({ text: parsedOutline.overall_strategy }),
+        new Paragraph({ text: "" }),
+      );
+    }
+
+    children.push(new Paragraph({ text: "投标文件提纲", heading: HeadingLevel.HEADING_1 }));
+
+    for (const { section, depth } of flatSections) {
+      const heading = depth === 0 ? HeadingLevel.HEADING_2 : depth === 1 ? HeadingLevel.HEADING_3 : HeadingLevel.HEADING_4;
+      const prefix = section.section_number ? `${section.section_number} ` : "";
+      children.push(new Paragraph({ text: `${prefix}${section.title}`, heading }));
+      if (section.content) {
+        children.push(new Paragraph({ text: section.content }));
+      }
+    }
+
+    if (parsedOutline?.personnel_plan?.length > 0) {
+      children.push(new Paragraph({ text: "" }));
+      children.push(new Paragraph({ text: "人员配置建议", heading: HeadingLevel.HEADING_1 }));
+      for (const p of parsedOutline.personnel_plan) {
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: `${p.role}`, bold: true }),
+            new TextRun({ text: ` — ${p.requirements || ""}` }),
+          ],
+        }));
+        if (p.suggested_candidate) {
+          children.push(new Paragraph({ text: `  建议人选: ${p.suggested_candidate}` }));
+        }
+      }
+    }
+
+    const doc = new Document({
+      sections: [{ properties: {}, children }],
+    });
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `${selectedProposal.project_name || "投标文件"}.docx`);
+    toast({ title: "导出成功", description: "投标文件已导出为Word格式" });
+  };
+
   const parsedOutline = selectedProposal?.outline_content
     ? (() => { try { return JSON.parse(selectedProposal.outline_content); } catch { return null; } })()
     : null;
@@ -356,9 +430,9 @@ export default function BiddingAssistant() {
                 </p>
                 {selectedProposal.token_usage && (
                   <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-2">
-                    <span>Prompt: {selectedProposal.token_usage.prompt_tokens?.toLocaleString()}</span>
-                    <span>Completion: {selectedProposal.token_usage.completion_tokens?.toLocaleString()}</span>
-                    <span className="font-medium text-foreground">Total: {selectedProposal.token_usage.total_tokens?.toLocaleString()}</span>
+                    <span>Prompt: {formatTokenCount(selectedProposal.token_usage.prompt_tokens)}</span>
+                    <span>Completion: {formatTokenCount(selectedProposal.token_usage.completion_tokens)}</span>
+                    <span className="font-medium text-foreground">Total: {formatTokenCount(selectedProposal.token_usage.total_tokens)}</span>
                   </div>
                 )}
               </div>
@@ -377,13 +451,18 @@ export default function BiddingAssistant() {
 
               {/* Outline tab */}
               <TabsContent value="outline" className="space-y-4">
-                {selectedProposal.token_usage && (
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground px-1">
-                    <span>🔤 Prompt: {selectedProposal.token_usage.prompt_tokens?.toLocaleString()}</span>
-                    <span>✍️ Completion: {selectedProposal.token_usage.completion_tokens?.toLocaleString()}</span>
-                    <span className="font-medium text-foreground">📊 Total: {selectedProposal.token_usage.total_tokens?.toLocaleString()}</span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between">
+                  {selectedProposal.token_usage && (
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground px-1">
+                      <span>🔤 Prompt: {formatTokenCount(selectedProposal.token_usage.prompt_tokens)}</span>
+                      <span>✍️ Completion: {formatTokenCount(selectedProposal.token_usage.completion_tokens)}</span>
+                      <span className="font-medium text-foreground">📊 Total: {formatTokenCount(selectedProposal.token_usage.total_tokens)}</span>
+                    </div>
+                  )}
+                  <Button variant="outline" size="sm" onClick={handleExportWord} disabled={sections.length === 0}>
+                    <Download className="w-4 h-4 mr-1" />导出Word
+                  </Button>
+                </div>
 
                 {parsedOutline?.overall_strategy && (
                   <Card>
