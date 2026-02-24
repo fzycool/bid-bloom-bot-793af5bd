@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, FileText, CheckCircle, AlertTriangle, XCircle,
   RefreshCw, Users, ChevronRight, ChevronDown, Loader2,
-  ClipboardCheck, Trash2, Search, Sparkles, Download,
+  ClipboardCheck, Trash2, Search, Sparkles, Download, Upload, Paperclip,
 } from "lucide-react";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { saveAs } from "file-saver";
@@ -65,6 +65,7 @@ interface ProposalMaterial {
   status: string;
   severity: string;
   matched_document_id: string | null;
+  matched_file_path: string | null;
   notes: string | null;
 }
 
@@ -95,7 +96,7 @@ export default function BiddingAssistant() {
   const [generating, setGenerating] = useState(false);
   const [checking, setChecking] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-
+  const [uploadingMaterialId, setUploadingMaterialId] = useState<string | null>(null);
   const fetchAnalyses = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
@@ -257,6 +258,30 @@ export default function BiddingAssistant() {
     });
   };
 
+  const handleMaterialUpload = async (materialId: string, file: File) => {
+    if (!user || !selectedProposal) return;
+    setUploadingMaterialId(materialId);
+    try {
+      const ext = file.name.split(".").pop() || "pdf";
+      const filePath = `${user.id}/${selectedProposal.id}/${materialId}_${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage.from("proposal-materials").upload(filePath, file);
+      if (uploadErr) throw uploadErr;
+
+      const { error: updateErr } = await supabase
+        .from("proposal_materials")
+        .update({ status: "uploaded", matched_file_path: filePath })
+        .eq("id", materialId);
+      if (updateErr) throw updateErr;
+
+      toast({ title: "上传成功", description: `${file.name} 已上传` });
+      await fetchProposalDetails(selectedProposal.id);
+    } catch (e: any) {
+      toast({ title: "上传失败", description: e.message, variant: "destructive" });
+    } finally {
+      setUploadingMaterialId(null);
+    }
+  };
+
   const handleExportWord = async () => {
     if (!selectedProposal) return;
     const flatSections = flattenSections(sections);
@@ -318,7 +343,50 @@ export default function BiddingAssistant() {
 
   const hardMissing = materials.filter((m) => m.requirement_type === "hard" && m.status === "missing");
   const softMissing = materials.filter((m) => m.requirement_type === "soft" && m.status === "missing");
-  const matched = materials.filter((m) => m.status === "matched");
+  const matched = materials.filter((m) => m.status === "matched" || m.status === "uploaded");
+
+  const renderMaterialItem = (m: ProposalMaterial, icon: React.ReactNode, bgClass: string) => (
+    <div key={m.id} className={`flex items-start justify-between gap-2 text-sm p-2 rounded ${bgClass}`}>
+      <div className="flex items-start gap-2 flex-1 min-w-0">
+        {icon}
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">{m.material_name || "未知材料"}</p>
+          <p className="text-muted-foreground text-xs mt-0.5">{m.requirement_text}</p>
+          {m.status === "uploaded" && m.matched_file_path && (
+            <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+              <Paperclip className="w-3 h-3" />
+              已上传: {m.matched_file_path.split("/").pop()}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0">
+        <label className="cursor-pointer">
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.docx,.doc,.xlsx,.xls,.jpg,.png,.jpeg"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleMaterialUpload(m.id, file);
+              e.target.value = "";
+            }}
+          />
+          <Button variant="outline" size="sm" asChild disabled={uploadingMaterialId === m.id}>
+            <span>
+              {uploadingMaterialId === m.id ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : m.status === "uploaded" ? (
+                <><RefreshCw className="w-3.5 h-3.5 mr-1" />重新上传</>
+              ) : (
+                <><Upload className="w-3.5 h-3.5 mr-1" />上传材料</>
+              )}
+            </span>
+          </Button>
+        </label>
+      </div>
+    </div>
+  );
 
   // ---- RENDER ----
   return (
@@ -522,15 +590,7 @@ export default function BiddingAssistant() {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
-                        {hardMissing.map((m) => (
-                          <div key={m.id} className="flex items-start gap-2 text-sm p-2 rounded bg-destructive/5">
-                            <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
-                            <div>
-                              <p className="font-medium text-foreground">{m.material_name || "未知材料"}</p>
-                              <p className="text-muted-foreground text-xs mt-0.5">{m.requirement_text}</p>
-                            </div>
-                          </div>
-                        ))}
+                        {hardMissing.map((m) => renderMaterialItem(m, <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />, "bg-destructive/5"))}
                       </div>
                     </CardContent>
                   </Card>
@@ -546,15 +606,7 @@ export default function BiddingAssistant() {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
-                        {softMissing.map((m) => (
-                          <div key={m.id} className="flex items-start gap-2 text-sm p-2 rounded bg-yellow-500/5">
-                            <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
-                            <div>
-                              <p className="font-medium text-foreground">{m.material_name || "未知材料"}</p>
-                              <p className="text-muted-foreground text-xs mt-0.5">{m.requirement_text}</p>
-                            </div>
-                          </div>
-                        ))}
+                        {softMissing.map((m) => renderMaterialItem(m, <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />, "bg-yellow-500/5"))}
                       </div>
                     </CardContent>
                   </Card>
@@ -570,15 +622,7 @@ export default function BiddingAssistant() {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
-                        {matched.map((m) => (
-                          <div key={m.id} className="flex items-start gap-2 text-sm p-2 rounded bg-green-500/5">
-                            <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                            <div>
-                              <p className="font-medium text-foreground">{m.material_name || "未知材料"}</p>
-                              <p className="text-muted-foreground text-xs mt-0.5">{m.requirement_text}</p>
-                            </div>
-                          </div>
-                        ))}
+                        {matched.map((m) => renderMaterialItem(m, <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />, "bg-green-500/5"))}
                       </div>
                     </CardContent>
                   </Card>
