@@ -346,6 +346,17 @@ export default function BiddingAssistant() {
   const softMissing = materials.filter((m) => m.requirement_type === "soft" && m.status === "missing");
   const matched = materials.filter((m) => m.status === "matched" || m.status === "uploaded");
 
+  // Group materials by format category for structured upload view
+  const groupMaterialsByFormat = (mats: ProposalMaterial[]) => {
+    const groups: Record<string, ProposalMaterial[]> = {};
+    for (const m of mats) {
+      const key = (m as any).material_format || "其他材料";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(m);
+    }
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  };
+
   const renderMaterialItem = (m: ProposalMaterial, icon: React.ReactNode, bgClass: string) => (
     <div key={m.id} className={`flex items-start justify-between gap-3 text-sm p-3 rounded-lg border border-border/50 ${bgClass}`}>
       <div className="flex items-start gap-2.5 flex-1 min-w-0">
@@ -587,7 +598,7 @@ export default function BiddingAssistant() {
                   </Button>
                 </div>
 
-                {/* Hard requirements - missing */}
+                {/* Hard requirements - grouped by format */}
                 {hardMissing.length > 0 && (
                   <Card className="border-destructive/30">
                     <CardHeader className="pb-2">
@@ -595,15 +606,23 @@ export default function BiddingAssistant() {
                         <XCircle className="w-4 h-4" /> 硬性要求 - 缺失材料（必须补全）
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {hardMissing.map((m) => renderMaterialItem(m, <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />, "bg-destructive/5"))}
-                      </div>
+                    <CardContent className="space-y-4">
+                      {groupMaterialsByFormat(hardMissing).map(([format, items]) => (
+                        <div key={format}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <Badge variant="outline" className="text-xs font-medium">{format}</Badge>
+                            <span className="text-xs text-muted-foreground">共 {items.length} 项</span>
+                          </div>
+                          <div className="space-y-2 ml-2 border-l-2 border-destructive/20 pl-3">
+                            {items.map((m) => renderMaterialItem(m, <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />, "bg-destructive/5"))}
+                          </div>
+                        </div>
+                      ))}
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Soft requirements - missing */}
+                {/* Soft requirements - grouped by format */}
                 {softMissing.length > 0 && (
                   <Card className="border-yellow-500/30">
                     <CardHeader className="pb-2">
@@ -611,26 +630,42 @@ export default function BiddingAssistant() {
                         <AlertTriangle className="w-4 h-4" /> 软性要求 - 建议补充
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {softMissing.map((m) => renderMaterialItem(m, <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />, "bg-yellow-500/5"))}
-                      </div>
+                    <CardContent className="space-y-4">
+                      {groupMaterialsByFormat(softMissing).map(([format, items]) => (
+                        <div key={format}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <Badge variant="outline" className="text-xs font-medium">{format}</Badge>
+                            <span className="text-xs text-muted-foreground">共 {items.length} 项</span>
+                          </div>
+                          <div className="space-y-2 ml-2 border-l-2 border-yellow-500/20 pl-3">
+                            {items.map((m) => renderMaterialItem(m, <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />, "bg-yellow-500/5"))}
+                          </div>
+                        </div>
+                      ))}
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Matched */}
+                {/* Matched/Uploaded - grouped by format */}
                 {matched.length > 0 && (
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm text-green-600 flex items-center gap-1.5">
-                        <CheckCircle className="w-4 h-4" /> 已匹配材料
+                        <CheckCircle className="w-4 h-4" /> 已匹配/已上传材料
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {matched.map((m) => renderMaterialItem(m, <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />, "bg-green-500/5"))}
-                      </div>
+                    <CardContent className="space-y-4">
+                      {groupMaterialsByFormat(matched).map(([format, items]) => (
+                        <div key={format}>
+                          <div className="flex items-center gap-2 mb-2">
+                            <Badge variant="outline" className="text-xs font-medium">{format}</Badge>
+                            <span className="text-xs text-muted-foreground">共 {items.length} 项</span>
+                          </div>
+                          <div className="space-y-2 ml-2 border-l-2 border-green-500/20 pl-3">
+                            {items.map((m) => renderMaterialItem(m, <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />, "bg-green-500/5"))}
+                          </div>
+                        </div>
+                      ))}
                     </CardContent>
                   </Card>
                 )}
