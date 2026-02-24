@@ -196,30 +196,36 @@ export default function BiddingAssistant() {
 
       if (error || !proposal) throw error || new Error("创建失败");
 
-      // Generate outline
-      const { error: fnErr } = await supabase.functions.invoke("bidding-assistant", {
+      // Immediately select the new proposal with processing status so polling starts
+      const newProposal: Proposal = {
+        ...(proposal as any),
+        ai_status: "processing",
+        ai_progress: "正在准备数据...",
+      };
+      setSelectedProposal(newProposal);
+      setCreating(false);
+      setProjectName("");
+      setCustomPrompt("");
+      setSelectedBidId("");
+      fetchProposals();
+
+      // Fire-and-forget: invoke edge function without awaiting
+      supabase.functions.invoke("bidding-assistant", {
         body: {
           action: "generate-outline",
           proposalId: (proposal as any).id,
           bidAnalysisId: selectedBidId,
           customPrompt: customPrompt.trim() || undefined,
         },
+      }).then(({ error: fnErr }) => {
+        if (fnErr) {
+          toast({ title: "生成失败", description: fnErr.message, variant: "destructive" });
+        }
       });
 
-      if (fnErr) throw fnErr;
-
-      toast({ title: "投标提纲生成成功" });
-      setCreating(false);
-      setProjectName("");
-      setCustomPrompt("");
-      setSelectedBidId("");
-      await fetchProposals();
-
-      // Auto-select the new proposal
-      const { data: fresh } = await supabase.from("bid_proposals").select("*").eq("id", (proposal as any).id).single();
-      if (fresh) setSelectedProposal(fresh as any);
+      toast({ title: "开始生成投标提纲", description: "请等待AI生成完成..." });
     } catch (e: any) {
-      toast({ title: "生成失败", description: e.message, variant: "destructive" });
+      toast({ title: "创建失败", description: e.message, variant: "destructive" });
     } finally {
       setGenerating(false);
     }
