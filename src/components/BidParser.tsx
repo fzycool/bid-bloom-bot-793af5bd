@@ -1220,7 +1220,20 @@ export default function BidParser() {
             <Card
               key={a.id}
               className="hover:shadow-card-hover transition-shadow cursor-pointer"
-              onClick={() => (a.ai_status !== "pending" && a.ai_status !== "analyzing_structure") && setSelectedAnalysis(a)}
+              onClick={async () => {
+                if (a.ai_status === "pending" || a.ai_status === "analyzing_structure") return;
+                // Always fetch fresh data from DB to avoid stale document_structure
+                const { data: fresh } = await supabase
+                  .from("bid_analyses")
+                  .select("*")
+                  .eq("id", a.id)
+                  .single();
+                if (fresh) {
+                  setSelectedAnalysis(fresh as unknown as BidAnalysis);
+                } else {
+                  setSelectedAnalysis(a);
+                }
+              }}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
