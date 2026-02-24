@@ -277,7 +277,7 @@ serve(async (req) => {
       model: aiModel,
       messages,
       tools: sanitizeTools(STRUCTURE_TOOLS),
-      max_tokens: 16384,
+      max_tokens: 8192,
     };
     if (isLovable) {
       requestBody.tool_choice = { type: "function", function: { name: "extract_document_structure" } };
