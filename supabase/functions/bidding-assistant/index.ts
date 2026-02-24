@@ -173,7 +173,7 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       { role: "user", content: userContent },
     ],
   };
-  requestBody.max_tokens = isLovable ? 32000 : 16000;
+  requestBody.max_tokens = isLovable ? 32000 : 8192;
 
   const response = await fetch(aiUrl, {
     method: "POST",
@@ -200,6 +200,12 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
     } as any).eq("id", proposalId);
   } else {
     await supabase.from("bid_proposals").update({ ai_progress: "AI生成完成，正在解析结果..." } as any).eq("id", proposalId);
+  }
+
+  // Detect truncated response
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (finishReason === "length") {
+    console.warn("AI response truncated (finish_reason=length), will attempt JSON repair");
   }
 
   let resultText = data.choices?.[0]?.message?.content || "";
