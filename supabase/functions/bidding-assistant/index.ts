@@ -156,9 +156,36 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       try {
         result = JSON.parse(resultText);
       } catch {
-        console.error("Failed to parse AI response:", resultText);
-        await supabase.from("bid_proposals").update({ ai_status: "failed" }).eq("id", proposalId);
-        throw new Error("AI返回格式异常");
+        // Attempt to repair truncated JSON
+        try {
+          let repaired = resultText
+            .replace(/,\s*}/g, "}")
+            .replace(/,\s*]/g, "]")
+            .replace(/[\x00-\x1F\x7F]/g, "");
+          
+          // Remove trailing incomplete key-value pair
+          repaired = repaired.replace(/,\s*"[^"]*":\s*("(?:[^"\\]|\\.)*)?$/g, "");
+          repaired = repaired.replace(/,\s*"[^"]*":\s*\[?\s*$/g, "");
+          repaired = repaired.replace(/,\s*{\s*"[^"]*":\s*("(?:[^"\\]|\\.)*)?$/g, "");
+          
+          // Balance braces and brackets
+          let braces = 0, brackets = 0;
+          for (const c of repaired) {
+            if (c === '{') braces++;
+            else if (c === '}') braces--;
+            else if (c === '[') brackets++;
+            else if (c === ']') brackets--;
+          }
+          while (brackets > 0) { repaired += ']'; brackets--; }
+          while (braces > 0) { repaired += '}'; braces--; }
+          
+          result = JSON.parse(repaired);
+          console.log("Successfully repaired truncated AI JSON response");
+        } catch (repairErr) {
+          console.error("Failed to parse AI response even after repair:", resultText.slice(-200));
+          await supabase.from("bid_proposals").update({ ai_status: "failed" }).eq("id", proposalId);
+          throw new Error("AI返回格式异常");
+        }
       }
 
       // Save outline content
