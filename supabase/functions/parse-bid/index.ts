@@ -27,6 +27,73 @@ function extractTextFromExcel(arrayBuffer: ArrayBuffer): string {
   return parts.join("\n").trim();
 }
 
+function repairAndParseJson(jsonString: string): any {
+  try {
+    return JSON.parse(jsonString);
+  } catch (_) { /* fall through to repair */ }
+
+  let cleaned = jsonString
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
+
+  const jsonStart = cleaned.search(/[\{\[]/);
+  if (jsonStart === -1) throw new Error("No JSON found in response");
+  const opener = cleaned[jsonStart];
+  const closer = opener === '[' ? ']' : '}';
+  const jsonEnd = cleaned.lastIndexOf(closer);
+  if (jsonEnd > jsonStart) {
+    cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+  } else {
+    cleaned = cleaned.substring(jsonStart);
+  }
+
+  // Remove trailing commas and control chars
+  cleaned = cleaned
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]")
+    .replace(/[\x00-\x1F\x7F]/g, " ");
+
+  // Fix unterminated strings: remove the last incomplete key-value if truncated
+  // by finding the last complete property
+  try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
+
+  // Close any open strings, objects, arrays
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < cleaned.length; i++) {
+    const c = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (c === '\\') { escape = true; continue; }
+    if (c === '"') inString = !inString;
+  }
+  if (inString) cleaned += '"';
+
+  // Remove trailing incomplete property (after last comma)
+  cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
+
+  // Balance braces/brackets
+  let braces = 0, brackets = 0;
+  for (const c of cleaned) {
+    if (c === '{') braces++;
+    if (c === '}') braces--;
+    if (c === '[') brackets++;
+    if (c === ']') brackets--;
+  }
+  if (brackets > 0) cleaned += ']'.repeat(brackets);
+  if (braces > 0) cleaned += '}'.repeat(braces);
+
+  // Final cleanup
+  cleaned = cleaned.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("JSON repair failed:", e);
+    throw new Error("AI返回的数据格式异常，请重试");
+  }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -329,7 +396,7 @@ serve(async (req) => {
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
 
     if (toolCall?.function?.arguments) {
-      const result = JSON.parse(toolCall.function.arguments);
+      const result = repairAndParseJson(toolCall.function.arguments);
 
       const updateData: any = {
         scoring_table: result.scoring_table || [],
