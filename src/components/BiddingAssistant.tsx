@@ -30,6 +30,8 @@ interface Proposal {
   project_name: string;
   status: string;
   ai_status: string;
+  ai_progress: string | null;
+  token_usage: any;
   outline_content: string | null;
   custom_prompt: string | null;
   bid_analysis_id: string | null;
@@ -122,12 +124,35 @@ export default function BiddingAssistant() {
 
   useEffect(() => { fetchAnalyses(); fetchProposals(); }, [fetchAnalyses, fetchProposals]);
 
+  // Poll for progress when a proposal is processing
+  useEffect(() => {
+    if (!selectedProposal || selectedProposal.ai_status !== "processing") return;
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from("bid_proposals")
+        .select("ai_status, ai_progress, token_usage")
+        .eq("id", selectedProposal.id)
+        .single();
+      if (data) {
+        setSelectedProposal((prev) => prev ? { ...prev, ...(data as any) } : prev);
+        if ((data as any).ai_status !== "processing") {
+          clearInterval(interval);
+          fetchProposals();
+          if ((data as any).ai_status === "completed") {
+            fetchProposalDetails(selectedProposal.id);
+          }
+        }
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [selectedProposal?.id, selectedProposal?.ai_status, fetchProposals, fetchProposalDetails]);
+
   useEffect(() => {
     if (selectedProposal) {
       fetchProposalDetails(selectedProposal.id);
       setCustomPrompt(selectedProposal.custom_prompt || "");
     }
-  }, [selectedProposal, fetchProposalDetails]);
+  }, [selectedProposal?.id, fetchProposalDetails]);
 
   const handleCreate = async () => {
     if (!user || !selectedBidId) return;
@@ -324,9 +349,18 @@ export default function BiddingAssistant() {
             </Card>
           ) : selectedProposal.ai_status === "processing" ? (
             <Card className="flex items-center justify-center py-20">
-              <div className="text-center">
-                <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin text-accent" />
-                <p className="text-sm text-muted-foreground">正在生成投标提纲...</p>
+              <div className="text-center space-y-3">
+                <Loader2 className="w-8 h-8 mx-auto animate-spin text-accent" />
+                <p className="text-sm font-medium text-foreground">
+                  {selectedProposal.ai_progress || "正在生成投标提纲..."}
+                </p>
+                {selectedProposal.token_usage && (
+                  <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-2">
+                    <span>Prompt: {selectedProposal.token_usage.prompt_tokens?.toLocaleString()}</span>
+                    <span>Completion: {selectedProposal.token_usage.completion_tokens?.toLocaleString()}</span>
+                    <span className="font-medium text-foreground">Total: {selectedProposal.token_usage.total_tokens?.toLocaleString()}</span>
+                  </div>
+                )}
               </div>
             </Card>
           ) : (
@@ -343,6 +377,14 @@ export default function BiddingAssistant() {
 
               {/* Outline tab */}
               <TabsContent value="outline" className="space-y-4">
+                {selectedProposal.token_usage && (
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground px-1">
+                    <span>🔤 Prompt: {selectedProposal.token_usage.prompt_tokens?.toLocaleString()}</span>
+                    <span>✍️ Completion: {selectedProposal.token_usage.completion_tokens?.toLocaleString()}</span>
+                    <span className="font-medium text-foreground">📊 Total: {selectedProposal.token_usage.total_tokens?.toLocaleString()}</span>
+                  </div>
+                )}
+
                 {parsedOutline?.overall_strategy && (
                   <Card>
                     <CardContent className="pt-4">

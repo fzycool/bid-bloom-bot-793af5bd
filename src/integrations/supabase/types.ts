@@ -194,6 +194,7 @@ export type Database = {
       }
       bid_proposals: {
         Row: {
+          ai_progress: string | null
           ai_status: string
           bid_analysis_id: string | null
           created_at: string
@@ -202,10 +203,12 @@ export type Database = {
           outline_content: string | null
           project_name: string
           status: string
+          token_usage: Json | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          ai_progress?: string | null
           ai_status?: string
           bid_analysis_id?: string | null
           created_at?: string
@@ -214,10 +217,12 @@ export type Database = {
           outline_content?: string | null
           project_name?: string
           status?: string
+          token_usage?: Json | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          ai_progress?: string | null
           ai_status?: string
           bid_analysis_id?: string | null
           created_at?: string
@@ -226,6 +231,7 @@ export type Database = {
           outline_content?: string | null
           project_name?: string
           status?: string
+          token_usage?: Json | null
           updated_at?: string
           user_id?: string
         }
