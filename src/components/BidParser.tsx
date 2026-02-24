@@ -253,6 +253,7 @@ export default function BidParser() {
       }
 
       await supabase.from("bid_analyses").update({ ai_status: "processing" } as any).eq("id", selectedAnalysis.id);
+      setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing" } : prev);
 
       const { error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
       if (fnErr) throw fnErr;
@@ -264,6 +265,7 @@ export default function BidParser() {
     } catch (err: any) {
       toast({ title: "详细解析失败", description: err.message, variant: "destructive" });
       await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);
+      setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "failed" } : prev);
     }
     setDetailParsing(false);
   };
