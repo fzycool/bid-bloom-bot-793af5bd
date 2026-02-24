@@ -23,6 +23,9 @@ import {
   Upload,
   FileText,
   GitCompare,
+  Pause,
+  Play,
+  XCircle,
 } from "lucide-react";
 
 interface StructureSection {
@@ -366,6 +369,9 @@ export default function BidParser() {
     const isProcessing = a.ai_status === "processing";
     const isTimeout = a.ai_status === "timeout";
     const isFailed = a.ai_status === "failed";
+    const isPaused = a.ai_status === "paused";
+    const isPausedStructure = a.ai_status === "paused_structure";
+    const isCancelled = a.ai_status === "cancelled";
 
     return (
       <div className="space-y-6">
@@ -407,11 +413,42 @@ export default function BidParser() {
         {/* Status indicators */}
         {isAnalyzingStructure && (
           <Card className="border-accent/30">
-            <CardContent className="flex items-center gap-3 p-6">
-              <Loader2 className="w-6 h-6 animate-spin text-accent" />
-              <div>
-                <p className="font-medium text-foreground">正在分析文档整体结构...</p>
-                <p className="text-sm text-muted-foreground">AI正在识别文档章节和目录结构</p>
+            <CardContent className="flex items-center justify-between p-6">
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-6 h-6 animate-spin text-accent" />
+                <div>
+                  <p className="font-medium text-foreground">正在分析文档整体结构...</p>
+                  <p className="text-sm text-muted-foreground">AI正在识别文档章节和目录结构</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={async () => {
+                    await supabase.from("bid_analyses").update({ ai_status: "paused_structure" } as any).eq("id", a.id);
+                    setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "paused_structure" } : prev);
+                    toast({ title: "已暂停结构分析" });
+                  }}
+                >
+                  <Pause className="w-4 h-4" />
+                  暂停解析
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-destructive hover:text-destructive"
+                  onClick={() => {
+                    supabase.from("bid_analyses").update({ ai_status: "cancelled" } as any).eq("id", a.id);
+                    setSelectedAnalysis(null);
+                    fetchAnalyses();
+                    toast({ title: "已退出解析" });
+                  }}
+                >
+                  <XCircle className="w-4 h-4" />
+                  退出解析
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -437,17 +474,149 @@ export default function BidParser() {
 
         {isProcessing && (
           <Card className="border-accent/30">
-            <CardContent className="flex items-center gap-3 p-6">
-              <Loader2 className="w-6 h-6 animate-spin text-accent" />
-              <div>
-                <p className="font-medium text-foreground">正在进行详细解析...</p>
-                <p className="text-sm text-muted-foreground">AI正在根据文档结构逐章节详细解读</p>
+            <CardContent className="flex items-center justify-between p-6">
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-6 h-6 animate-spin text-accent" />
+                <div>
+                  <p className="font-medium text-foreground">正在进行详细解析...</p>
+                  <p className="text-sm text-muted-foreground">AI正在根据文档结构逐章节详细解读</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={async () => {
+                    await supabase.from("bid_analyses").update({ ai_status: "paused" } as any).eq("id", a.id);
+                    setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "paused" } : prev);
+                    toast({ title: "已暂停详细解析" });
+                  }}
+                >
+                  <Pause className="w-4 h-4" />
+                  暂停解析
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-destructive hover:text-destructive"
+                  onClick={() => {
+                    supabase.from("bid_analyses").update({ ai_status: "cancelled" } as any).eq("id", a.id);
+                    setSelectedAnalysis(null);
+                    fetchAnalyses();
+                    toast({ title: "已退出解析" });
+                  }}
+                >
+                  <XCircle className="w-4 h-4" />
+                  退出解析
+                </Button>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Step 1: Document Structure Display */}
+        {/* Paused state: show resume button */}
+        {isPausedStructure && (
+          <Card className="border-amber-300/50 bg-amber-50/30">
+            <CardContent className="flex items-center justify-between p-6">
+              <div className="flex items-center gap-3">
+                <Pause className="w-6 h-6 text-amber-600" />
+                <div>
+                  <p className="font-medium text-foreground">结构分析已暂停</p>
+                  <p className="text-sm text-muted-foreground">当前解析状态已保存，可随时继续</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    supabase.from("bid_analyses").update({ ai_status: "analyzing_structure" } as any).eq("id", a.id);
+                    setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "analyzing_structure" } : prev);
+                    handleReAnalyze();
+                  }}
+                >
+                  <Play className="w-4 h-4" />
+                  继续解析
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-destructive hover:text-destructive"
+                  onClick={() => {
+                    supabase.from("bid_analyses").update({ ai_status: "cancelled" } as any).eq("id", a.id);
+                    setSelectedAnalysis(null);
+                    fetchAnalyses();
+                    toast({ title: "已退出解析" });
+                  }}
+                >
+                  <XCircle className="w-4 h-4" />
+                  退出解析
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isPaused && (
+          <Card className="border-amber-300/50 bg-amber-50/30">
+            <CardContent className="flex items-center justify-between p-6">
+              <div className="flex items-center gap-3">
+                <Pause className="w-6 h-6 text-amber-600" />
+                <div>
+                  <p className="font-medium text-foreground">详细解析已暂停</p>
+                  <p className="text-sm text-muted-foreground">当前解析状态已保存，可随时继续</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing" } : prev);
+                    handleDetailParse();
+                  }}
+                >
+                  <Play className="w-4 h-4" />
+                  继续解析
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-destructive hover:text-destructive"
+                  onClick={() => {
+                    supabase.from("bid_analyses").update({ ai_status: "cancelled" } as any).eq("id", a.id);
+                    setSelectedAnalysis(null);
+                    fetchAnalyses();
+                    toast({ title: "已退出解析" });
+                  }}
+                >
+                  <XCircle className="w-4 h-4" />
+                  退出解析
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isCancelled && (
+          <Card className="border-border">
+            <CardContent className="flex items-center justify-between p-6">
+              <div className="flex items-center gap-3">
+                <XCircle className="w-6 h-6 text-muted-foreground" />
+                <div>
+                  <p className="font-medium text-foreground">解析已取消</p>
+                  <p className="text-sm text-muted-foreground">可重新开始解析此文档</p>
+                </div>
+              </div>
+              <Button onClick={handleReAnalyze} disabled={reAnalyzing} className="gap-2">
+                {reAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                重新解析
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {structure && (
           <Card className="border-2 border-accent/30">
             <CardHeader className="pb-2">
@@ -1012,7 +1181,7 @@ export default function BidParser() {
             <Card
               key={a.id}
               className="hover:shadow-card-hover transition-shadow cursor-pointer"
-              onClick={() => (a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed") && setSelectedAnalysis(a)}
+              onClick={() => (a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed" || a.ai_status === "paused" || a.ai_status === "paused_structure" || a.ai_status === "cancelled") && setSelectedAnalysis(a)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -1060,9 +1229,16 @@ export default function BidParser() {
                     {a.ai_status === "timeout" && (
                       <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">⏱ 解析超时</Badge>
                     )}
-                    {(a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed") && (
+                    {(a.ai_status === "paused" || a.ai_status === "paused_structure") && (
+                      <Badge className="bg-amber-100 text-amber-800 whitespace-nowrap">⏸ 已暂停</Badge>
+                    )}
+                    {a.ai_status === "cancelled" && (
+                      <Badge className="bg-gray-100 text-gray-800 whitespace-nowrap">已取消</Badge>
+                    )}
+                    {(a.ai_status === "completed" || a.ai_status === "structure_ready" || a.ai_status === "timeout" || a.ai_status === "failed" || a.ai_status === "paused" || a.ai_status === "paused_structure" || a.ai_status === "cancelled") && (
                       <Button variant="ghost" size="sm" className="text-xs gap-1 shrink-0">
-                        <Eye className="w-3.5 h-3.5" />{a.ai_status === "structure_ready" ? "查看结构" : a.ai_status === "timeout" ? "重试" : a.ai_status === "failed" ? "重试" : "查看"}
+                        <Eye className="w-3.5 h-3.5" />
+                        {a.ai_status === "structure_ready" ? "查看结构" : a.ai_status === "timeout" ? "重试" : a.ai_status === "failed" ? "重试" : (a.ai_status === "paused" || a.ai_status === "paused_structure") ? "继续" : a.ai_status === "cancelled" ? "查看" : "查看"}
                       </Button>
                     )}
                     <Button
