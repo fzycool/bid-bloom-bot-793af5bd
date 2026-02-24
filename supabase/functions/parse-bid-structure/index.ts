@@ -82,6 +82,50 @@ const STRUCTURE_TOOLS = [{
   },
 }];
 
+function repairAndParseJson(raw: string): any {
+  // Strip markdown fences
+  let s = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  // Try direct parse first
+  try { return JSON.parse(s); } catch (_) { /* continue */ }
+
+  // Find JSON boundaries
+  const start = s.indexOf("{");
+  if (start === -1) throw new Error("No JSON object found");
+  s = s.substring(start);
+
+  // Remove trailing incomplete key-value after last comma
+  s = s.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
+  // Remove trailing incomplete array items
+  s = s.replace(/,\s*\{[^}]*$/, "");
+
+  // Balance braces and brackets
+  let braces = 0, brackets = 0, inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") braces++;
+    else if (c === "}") braces--;
+    else if (c === "[") brackets++;
+    else if (c === "]") brackets--;
+  }
+
+  // Close unterminated string
+  if (inStr) s += '"';
+
+  // Remove trailing comma before closing
+  s = s.replace(/,\s*$/, "");
+
+  // Append missing closers
+  for (let i = 0; i < brackets; i++) s += "]";
+  for (let i = 0; i < braces; i++) s += "}";
+
+  return JSON.parse(s);
+}
+
 const SYSTEM_PROMPT = `你是一位资深招投标专家。请分析以下招标文件，提取其整体结构（章节目录树）。
 
 要求：
@@ -233,6 +277,7 @@ serve(async (req) => {
       model: aiModel,
       messages,
       tools: sanitizeTools(STRUCTURE_TOOLS),
+      max_tokens: 16384,
     };
     if (isLovable) {
       requestBody.tool_choice = { type: "function", function: { name: "extract_document_structure" } };
@@ -260,7 +305,7 @@ serve(async (req) => {
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
 
     if (toolCall?.function?.arguments) {
-      const result = JSON.parse(toolCall.function.arguments);
+      const result = repairAndParseJson(toolCall.function.arguments);
 
       await supabase.from("bid_analyses").update({
         document_structure: result,
