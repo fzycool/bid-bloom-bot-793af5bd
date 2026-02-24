@@ -188,6 +188,7 @@ serve(async (req) => {
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
+    const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
 
     function sanitizeTools(tools: any[]) {
       if (isLovable) return tools;

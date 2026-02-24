@@ -23,6 +23,7 @@ serve(async (req) => {
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
+    const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
 
     const { action, ...params } = await req.json();
 
@@ -35,7 +36,7 @@ serve(async (req) => {
 
       // Do all heavy work in background
       EdgeRuntime.waitUntil(
-        processOutline(supabase, { proposalId, bidAnalysisId, customPrompt, aiUrl, aiModel, aiKey, isLovable }).catch(async (error) => {
+        processOutline(supabase, { proposalId, bidAnalysisId, customPrompt, aiUrl, aiModel, aiKey, isLovable, maxTokens: configMaxTokens }).catch(async (error) => {
           console.error("Background processing error:", error);
           await supabase.from("bid_proposals").update({ ai_status: "failed", ai_progress: error.message || "处理失败" } as any).eq("id", proposalId);
         })
@@ -101,9 +102,9 @@ serve(async (req) => {
 // ---- Background processing function ----
 async function processOutline(supabase: any, opts: {
   proposalId: string; bidAnalysisId: string; customPrompt?: string;
-  aiUrl: string; aiModel: string; aiKey: string; isLovable: boolean;
+  aiUrl: string; aiModel: string; aiKey: string; isLovable: boolean; maxTokens: number;
 }) {
-  const { proposalId, bidAnalysisId, customPrompt, aiUrl, aiModel, aiKey, isLovable } = opts;
+  const { proposalId, bidAnalysisId, customPrompt, aiUrl, aiModel, aiKey, isLovable, maxTokens } = opts;
 
   try {
   // Fetch bid analysis data
@@ -173,7 +174,7 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
       { role: "user", content: userContent },
     ],
   };
-  requestBody.max_tokens = isLovable ? 32000 : 8192;
+  requestBody.max_tokens = maxTokens;
 
   const response = await fetch(aiUrl, {
     method: "POST",

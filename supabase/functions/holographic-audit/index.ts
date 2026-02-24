@@ -24,6 +24,7 @@ serve(async (req) => {
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
+    const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
 
     const { proposalId, filePath, fileType, auditType = "full" } = await req.json();
     if (!proposalId) throw new Error("proposalId is required");

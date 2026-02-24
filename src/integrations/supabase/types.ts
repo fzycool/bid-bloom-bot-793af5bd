@@ -367,6 +367,7 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean
+          max_tokens: number
           model_name: string
           provider: string
           updated_at: string
@@ -378,6 +379,7 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean
+          max_tokens?: number
           model_name: string
           provider: string
           updated_at?: string
@@ -389,6 +391,7 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean
+          max_tokens?: number
           model_name?: string
           provider?: string
           updated_at?: string

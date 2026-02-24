@@ -22,7 +22,16 @@ interface ModelConfig {
   base_url: string;
   api_key: string | null;
   is_active: boolean;
+  max_tokens: number;
 }
+
+const PROVIDER_DEFAULTS: Record<string, number> = {
+  lovable: 32000,
+  deepseek: 8192,
+  openai: 16384,
+  qwen: 8192,
+  zhipu: 8192,
+};
 
 const ModelManagement = () => {
   const { toast } = useToast();
@@ -30,6 +39,7 @@ const ModelManagement = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [editKeys, setEditKeys] = useState<Record<string, string>>({});
+  const [editMaxTokens, setEditMaxTokens] = useState<Record<string, number>>({});
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
 
   const fetchModels = async () => {
@@ -42,10 +52,13 @@ const ModelManagement = () => {
       if (error) throw error;
       setModels((data as unknown as ModelConfig[]) || []);
       const keys: Record<string, string> = {};
+      const tokens: Record<string, number> = {};
       (data as unknown as ModelConfig[])?.forEach((m) => {
         keys[m.id] = m.api_key || "";
+        tokens[m.id] = m.max_tokens || PROVIDER_DEFAULTS[m.provider] || 8192;
       });
       setEditKeys(keys);
+      setEditMaxTokens(tokens);
     } catch (err: any) {
       toast({ title: "加载失败", description: err.message, variant: "destructive" });
     } finally {
@@ -62,10 +75,10 @@ const ModelManagement = () => {
     try {
       const { error } = await supabase
         .from("model_config")
-        .update({ api_key: editKeys[model.id] || null } as any)
+        .update({ api_key: editKeys[model.id] || null, max_tokens: editMaxTokens[model.id] || 8192 } as any)
         .eq("id", model.id);
       if (error) throw error;
-      toast({ title: "API Key 已保存" });
+      toast({ title: "配置已保存" });
       fetchModels();
     } catch (err: any) {
       toast({ title: "保存失败", description: err.message, variant: "destructive" });
@@ -150,6 +163,18 @@ const ModelManagement = () => {
             <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
               <div>模型: <code className="bg-muted px-1 py-0.5 rounded">{m.model_name}</code></div>
               <div className="break-all">接口: <code className="bg-muted px-1 py-0.5 rounded">{m.base_url}</code></div>
+              <div className="flex items-center gap-2 mt-1">
+                <span>Max Tokens:</span>
+                <Input
+                  type="number"
+                  value={editMaxTokens[m.id] || 8192}
+                  onChange={(e) => setEditMaxTokens((prev) => ({ ...prev, [m.id]: parseInt(e.target.value) || 8192 }))}
+                  className="w-24 text-xs h-6 px-1.5"
+                  min={1024}
+                  max={128000}
+                  step={1024}
+                />
+              </div>
             </div>
 
             {m.provider !== "lovable" && (

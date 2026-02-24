@@ -159,6 +159,7 @@ serve(async (req) => {
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
+    const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
 
     // 清理工具 schema 中第三方不兼容的字段
     function sanitizeTools(tools: any[]) {
@@ -277,7 +278,7 @@ serve(async (req) => {
       model: aiModel,
       messages,
       tools: sanitizeTools(STRUCTURE_TOOLS),
-      max_tokens: 8192,
+      max_tokens: Math.min(configMaxTokens, 8192),
     };
     if (isLovable) {
       requestBody.tool_choice = { type: "function", function: { name: "extract_document_structure" } };
