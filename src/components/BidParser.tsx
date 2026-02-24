@@ -306,9 +306,15 @@ export default function BidParser() {
       }));
 
       toast({ title: "详细解析完成" });
-      await fetchAnalyses();
+      // Immediately refetch fresh data and update UI
       const { data: updated } = await supabase.from("bid_analyses").select("*").eq("id", selectedAnalysis.id).single();
-      if (updated) setSelectedAnalysis(updated as unknown as BidAnalysis);
+      if (updated) {
+        setSelectedAnalysis(updated as unknown as BidAnalysis);
+      } else {
+        // Fallback: optimistically set status to completed so UI transitions
+        setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "completed" } : prev);
+      }
+      await fetchAnalyses();
     } catch (err: any) {
       toast({ title: "详细解析失败", description: err.message, variant: "destructive" });
       await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);
