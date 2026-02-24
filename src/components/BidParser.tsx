@@ -1093,6 +1093,31 @@ export default function BidParser() {
                 <div
                   className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-accent/50 hover:bg-accent/5 transition-colors"
                   onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const files = Array.from(e.dataTransfer.files);
+                    if (files.length === 0) return;
+                    const allowedExts = /\.(pdf|docx?|xlsx?|xls)$/i;
+                    const validFiles = files.filter((f) => allowedExts.test(f.name));
+                    const invalidFiles = files.filter((f) => !allowedExts.test(f.name));
+                    if (invalidFiles.length > 0) {
+                      toast({
+                        title: "不支持的文件格式",
+                        description: `${invalidFiles.map((f) => f.name).join("、")} 格式不支持，请上传 PDF、Word 或 Excel 文件`,
+                        variant: "destructive",
+                      });
+                    }
+                    if (validFiles.length > 0) {
+                      setUploadedFiles((prev) => [...prev, ...validFiles]);
+                      if (!projectName && validFiles.length === 1) {
+                        setProjectName(validFiles[0].name.replace(/\.(pdf|docx?|xlsx?|txt)$/i, ""));
+                      }
+                    }
+                  }}
                 >
                   {uploadedFiles.length > 0 ? (
                     <div className="space-y-2">
