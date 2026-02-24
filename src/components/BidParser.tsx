@@ -67,6 +67,8 @@ interface BidAnalysis {
   requires_presentation: boolean | null;
   deposit_amount: string | null;
   document_structure: any;
+  user_id: string;
+  submitter_name?: string;
 }
 
 export default function BidParser() {
@@ -127,7 +129,25 @@ export default function BidParser() {
       .from("bid_analyses")
       .select("*")
       .order("created_at", { ascending: false });
-    const analyses = (data as unknown as BidAnalysis[]) || [];
+    const rawAnalyses = (data as unknown as BidAnalysis[]) || [];
+
+    // Fetch submitter names from profiles
+    const userIds = [...new Set(rawAnalyses.map((a) => a.user_id))];
+    const profileMap: Record<string, string> = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, company")
+        .in("user_id", userIds);
+      for (const p of profiles || []) {
+        profileMap[p.user_id] = p.full_name || p.company || "未知用户";
+      }
+    }
+
+    const analyses = rawAnalyses.map((a) => ({
+      ...a,
+      submitter_name: profileMap[a.user_id] || "未知用户",
+    }));
     
     // Auto-detect timeout: if processing/analyzing_structure for >5 minutes, mark as timeout
     const TIMEOUT_MS = 5 * 60 * 1000;
@@ -1330,6 +1350,9 @@ export default function BidParser() {
                   <div className="flex-1 min-w-0">
                     <span className="font-medium text-foreground text-sm line-clamp-1">{a.project_name}</span>
                     <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-muted-foreground font-medium text-xs whitespace-nowrap">
+                        👤 {a.submitter_name}
+                      </span>
                       <span className="whitespace-nowrap">{new Date(a.created_at).toLocaleString("zh-CN")}</span>
                       {a.bid_deadline && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold text-xs whitespace-nowrap">
