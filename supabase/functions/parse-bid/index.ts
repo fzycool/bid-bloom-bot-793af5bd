@@ -399,6 +399,18 @@ serve(async (req) => {
     if (toolCall?.function?.arguments) {
       const result = repairAndParseJson(toolCall.function.arguments);
 
+      // Accumulate token usage: read existing, add new
+      let tokenData: any = null;
+      if (usage) {
+        const { data: existing } = await supabase.from("bid_analyses").select("token_usage").eq("id", analysisId).single();
+        const prev = (existing?.token_usage as any) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+        tokenData = {
+          prompt_tokens: (prev.prompt_tokens || 0) + (usage.prompt_tokens || 0),
+          completion_tokens: (prev.completion_tokens || 0) + (usage.completion_tokens || 0),
+          total_tokens: (prev.total_tokens || 0) + (usage.total_tokens || 0),
+        };
+      }
+
       const updateData: any = {
         scoring_table: result.scoring_table || [],
         disqualification_items: result.disqualification_items || [],
@@ -412,6 +424,7 @@ serve(async (req) => {
         risk_score: result.risk_score ?? 50,
         ai_status: "completed",
       };
+      if (tokenData) updateData.token_usage = tokenData;
       if (result.bid_deadline) updateData.bid_deadline = result.bid_deadline;
       if (result.bid_location) updateData.bid_location = result.bid_location;
       if (result.requires_presentation !== undefined && result.requires_presentation !== null) updateData.requires_presentation = result.requires_presentation;

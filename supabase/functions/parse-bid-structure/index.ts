@@ -308,9 +308,11 @@ serve(async (req) => {
     if (toolCall?.function?.arguments) {
       const result = repairAndParseJson(toolCall.function.arguments);
 
+      const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
       await supabase.from("bid_analyses").update({
         document_structure: result,
         ai_status: "structure_ready",
+        token_usage: tokenData,
       }).eq("id", analysisId);
 
       return new Response(JSON.stringify({ success: true, structure: result, usage }), {

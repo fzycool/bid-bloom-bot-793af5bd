@@ -89,6 +89,37 @@ export default function BidParser() {
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [detailParsing, setDetailParsing] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null>(null);
+  const tokenPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll token_usage from DB during parsing
+  const startTokenPolling = useCallback((analysisId: string) => {
+    stopTokenPolling();
+    tokenPollRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .from("bid_analyses")
+        .select("token_usage, ai_status")
+        .eq("id", analysisId)
+        .single();
+      if (data?.token_usage) {
+        const tu = data.token_usage as any;
+        setTokenUsage({ prompt_tokens: tu.prompt_tokens, completion_tokens: tu.completion_tokens, total_tokens: tu.total_tokens });
+      }
+      // Stop polling when parsing is done
+      if (data && !["analyzing_structure", "processing"].includes(data.ai_status)) {
+        stopTokenPolling();
+      }
+    }, 2000);
+  }, []);
+
+  const stopTokenPolling = useCallback(() => {
+    if (tokenPollRef.current) {
+      clearInterval(tokenPollRef.current);
+      tokenPollRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => stopTokenPolling(), [stopTokenPolling]);
 
   const fetchAnalyses = useCallback(async () => {
     if (!user) return;
@@ -156,6 +187,8 @@ export default function BidParser() {
         }
 
         try {
+          setTokenUsage(null);
+          startTokenPolling(analysis.id);
           // Step 1: Analyze structure first
           const { data: respData, error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
             body: {
@@ -166,6 +199,7 @@ export default function BidParser() {
             },
           });
           if (structErr) throw structErr;
+          stopTokenPolling();
           if (respData?.usage) setTokenUsage(respData.usage);
           lastAnalysis = analysis;
         } catch (err: any) {
@@ -202,6 +236,8 @@ export default function BidParser() {
       }
 
       try {
+        setTokenUsage(null);
+        startTokenPolling(analysis.id);
         // Step 1: Analyze structure first
         const { data: respData, error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
           body: {
@@ -211,6 +247,7 @@ export default function BidParser() {
           },
         });
         if (structErr) throw structErr;
+        stopTokenPolling();
         if (respData?.usage) setTokenUsage(respData.usage);
 
         toast({ title: "结构分析完成", description: "请查看文档结构后进行详细解析" });
@@ -257,8 +294,10 @@ export default function BidParser() {
 
       await supabase.from("bid_analyses").update({ ai_status: "processing" } as any).eq("id", selectedAnalysis.id);
       setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing" } : prev);
+      startTokenPolling(selectedAnalysis.id);
 
       const { data: respData, error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
+      stopTokenPolling();
       if (fnErr) throw fnErr;
       if (respData?.usage) setTokenUsage((prev) => ({
         prompt_tokens: (prev?.prompt_tokens || 0) + (respData.usage.prompt_tokens || 0),
@@ -288,10 +327,12 @@ export default function BidParser() {
   const handleReAnalyze = async () => {
     if (!selectedAnalysis || !user) return;
     setReAnalyzing(true);
+    setTokenUsage(null);
     const newPrompt = editingPrompt.trim() || null;
 
-    await supabase.from("bid_analyses").update({ ai_status: "analyzing_structure", custom_prompt: newPrompt } as any).eq("id", selectedAnalysis.id);
+    await supabase.from("bid_analyses").update({ ai_status: "analyzing_structure", custom_prompt: newPrompt, token_usage: null } as any).eq("id", selectedAnalysis.id);
     setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "analyzing_structure", custom_prompt: newPrompt } : prev);
+    startTokenPolling(selectedAnalysis.id);
 
     try {
       const body: any = {
@@ -311,6 +352,7 @@ export default function BidParser() {
 
       // Step 1: Re-analyze structure
       const { data: respData, error: structErr } = await supabase.functions.invoke("parse-bid-structure", { body });
+      stopTokenPolling();
       if (structErr) throw structErr;
       if (respData?.usage) setTokenUsage(respData.usage);
 
@@ -337,10 +379,13 @@ export default function BidParser() {
     return "text-green-600";
   };
 
-  // When selecting an analysis, initialize editing prompt
+  // When selecting an analysis, initialize editing prompt and load saved token usage
   useEffect(() => {
     if (selectedAnalysis) {
       setEditingPrompt(selectedAnalysis.custom_prompt || "1. 投标截止时间，投标地点，是否讲标，投标保证金金额\n2. 评分标准表（分类、权重、评分细则、佐证材料）\n3. 废标项（★标记、否决投标条款）\n4. 陷阱项（容易忽略的失分条款）\n5. 人员配置要求（角色、数量、资质、证书）\n6. 专业技能/业务技能/职责关键词\n7. 风险评分与总体分析\n8. 检查招标文件中明显有逻辑错误或者冲突的内容");
+      // Load saved token usage from DB
+      const tu = (selectedAnalysis as any).token_usage;
+      if (tu) setTokenUsage({ prompt_tokens: tu.prompt_tokens, completion_tokens: tu.completion_tokens, total_tokens: tu.total_tokens });
     }
   }, [selectedAnalysis?.id]);
 
@@ -397,13 +442,14 @@ export default function BidParser() {
             <h2 className="text-xl font-bold text-foreground">{a.project_name}</h2>
             <p className="text-sm text-muted-foreground">
               解析于 {new Date(a.created_at).toLocaleString("zh-CN")}
-              {tokenUsage && (
-                <span className="ml-3 inline-flex items-center gap-1 text-xs font-mono bg-muted px-2 py-0.5 rounded">
-                  🔢 Token: {tokenUsage.total_tokens?.toLocaleString()}
-                  <span className="text-muted-foreground/70">（输入 {tokenUsage.prompt_tokens?.toLocaleString()} / 输出 {tokenUsage.completion_tokens?.toLocaleString()}）</span>
-                </span>
-              )}
             </p>
+            {(tokenUsage || isAnalyzingStructure || isProcessing) && (
+              <div className="mt-1 inline-flex items-center gap-1.5 text-xs font-mono bg-muted px-2.5 py-1 rounded">
+                {(isAnalyzingStructure || isProcessing) && <Loader2 className="h-3 w-3 animate-spin text-accent" />}
+                🔢 Token: {(tokenUsage?.total_tokens || 0).toLocaleString()}
+                <span className="text-muted-foreground/70">（输入 {(tokenUsage?.prompt_tokens || 0).toLocaleString()} / 输出 {(tokenUsage?.completion_tokens || 0).toLocaleString()}）</span>
+              </div>
+            )}
             {isCompleted && (
               <div className="flex items-center gap-3 mt-2 flex-wrap">
                 {a.bid_deadline && (

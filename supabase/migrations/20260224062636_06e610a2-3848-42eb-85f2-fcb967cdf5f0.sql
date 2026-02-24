@@ -1,0 +1,1 @@
+ALTER TABLE public.bid_analyses ADD COLUMN IF NOT EXISTS token_usage jsonb DEFAULT null;

@@ -87,6 +87,7 @@ export type Database = {
           scoring_table: Json | null
           summary: string | null
           technical_keywords: Json | null
+          token_usage: Json | null
           trap_items: Json | null
           updated_at: string
           user_id: string
@@ -113,6 +114,7 @@ export type Database = {
           scoring_table?: Json | null
           summary?: string | null
           technical_keywords?: Json | null
+          token_usage?: Json | null
           trap_items?: Json | null
           updated_at?: string
           user_id: string
@@ -139,6 +141,7 @@ export type Database = {
           scoring_table?: Json | null
           summary?: string | null
           technical_keywords?: Json | null
+          token_usage?: Json | null
           trap_items?: Json | null
           updated_at?: string
           user_id?: string
