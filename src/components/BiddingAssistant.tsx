@@ -168,12 +168,23 @@ export default function BiddingAssistant() {
     for (const pm of proposalMats) {
       const name = (pm.material_name || "").toLowerCase().trim();
       if (!name) continue;
-      // Try exact match on material_type or content_description
       const match = cms.find((cm) => {
         const cmType = (cm.material_type || "").toLowerCase().trim();
         const cmDesc = (cm.content_description || "").toLowerCase().trim();
-        // 100% match: material_type equals material_name, or description contains material_name
-        return (cmType && cmType === name) || (cmDesc && cmDesc.includes(name)) || (cmType && name.includes(cmType));
+        // Direct containment checks
+        if (cmType && (cmType === name || name.includes(cmType) || cmType.includes(name))) return true;
+        if (cmDesc && (cmDesc.includes(name) || name.includes(cmDesc))) return true;
+        // Keyword-based matching: extract key terms and check overlap
+        // e.g. "ISO9001" in name matches "ISO9001" in description
+        const keywords = name.match(/[a-z0-9]+|[\u4e00-\u9fa5]{2,}/gi) || [];
+        for (const kw of keywords) {
+          const kwLower = kw.toLowerCase();
+          if (kwLower.length < 2) continue;
+          // Match specific certificate identifiers like ISO9001, ISO27001, CMMI etc.
+          if (/^(iso|cmmi|tmmi|gb)/i.test(kwLower) && (cmDesc.includes(kwLower) || cmType.includes(kwLower))) return true;
+          if (kwLower === "营业执照" && (cmType.includes("营业执照") || cmDesc.includes("营业执照"))) return true;
+        }
+        return false;
       });
       if (match) matchMap.set(pm.id, match);
     }
