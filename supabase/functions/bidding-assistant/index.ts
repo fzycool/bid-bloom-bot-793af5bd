@@ -127,26 +127,38 @@ async function processOutline(supabase: any, opts: {
 
   let systemContent = `你是资深投标专家，擅长根据招标文件编制高质量投标文件。请根据以下招标解析结果，生成完整的投标文件应答提纲。
 
-要求：
-1. 严格按照招标文件的目录和评分标准组织章节
-2. 每个章节标注需要的证明材料
-3. 识别硬性要求（资质证书、业绩证明等）和软性要求（方案描述等）
-4. 标注每个章节对应的评分分值
-5. 建议可关联的知识库模板
-6. 【极其重要】material_checklist 的生成规则：
-   - 每一项证书、资质、证明文件都必须作为独立的一条记录，绝不允许合并
-   - 例如：如果招标文件要求"CMMI L5级、ISO 27001、ISO 9001三项认证"，你必须生成3条独立记录
-   - 每条记录的 material_name 必须是一个具体的、可独立上传的文件名称
-   - 绝对禁止出现"XX等N项证书"、"多项认证复印件"这样的合并描述
-7. 【极其重要】material_format 字段必须填写，使用以下标准分类名称：
-   - "资质认证证书" | "企业基本资料" | "财务证明材料" | "人员资质证明" | "业绩证明材料" | "技术能力证明" | "声明承诺文件" | "投标文件组成"
+【信息来源（必须全部覆盖）】
+1. 投标人须知——投标文件构成
+2. 投标人须知前附表/前附表——投标文件构成/组成/投标文件应包括但不限于
+3. 投标文件格式
+4. 资格要求
+5. 评分标准/评分表
+
+【提纲编写规则】
+A) 顺序：招标文件有明确要求的，严格按照招标文件要求的顺序执行；没有明确要求的，按结构清晰、逻辑合理的方式组织
+B) 内容：提纲结构必须完整包含上述所有信息来源的全部内容，不允许遗漏任何一项；如果"投标文件格式"中有对应内容模板，必须在提纲中标注匹配关系
+C) 每个章节标注需要的证明材料
+D) 识别硬性要求（资质证书、业绩证明等）和软性要求（方案描述等）
+E) 标注每个章节对应的评分分值
+F) 建议可关联的知识库模板
+G) 对于有字体、字号、行间距等格式要求的，在章节描述中明确标注这些格式要求
+
+【极其重要】material_checklist 的生成规则：
+- 每一项证书、资质、证明文件都必须作为独立的一条记录，绝不允许合并
+- 例如：如果招标文件要求"CMMI L5级、ISO 27001、ISO 9001三项认证"，你必须生成3条独立记录
+- 每条记录的 material_name 必须是一个具体的、可独立上传的文件名称
+- 绝对禁止出现"XX等N项证书"、"多项认证复印件"这样的合并描述
+
+【极其重要】material_format 字段必须填写，使用以下标准分类名称：
+- "资质认证证书" | "企业基本资料" | "财务证明材料" | "人员资质证明" | "业绩证明材料" | "技术能力证明" | "声明承诺文件" | "投标文件组成"
 
 请输出JSON格式：
 {
-  "outline": [{ "section_number": "1", "title": "章节标题", "description": "说明", "score_weight": "分值", "children": [{ "section_number": "1.1", "title": "子章节", "description": "内容要求", "required_materials": ["材料"], "suggested_template": "模板类型" }] }],
+  "outline": [{ "section_number": "1", "title": "章节标题", "description": "说明（含格式要求）", "score_weight": "分值", "format_requirements": "字体字号行间距要求（如有）", "children": [{ "section_number": "1.1", "title": "子章节", "description": "内容要求", "required_materials": ["材料"], "suggested_template": "模板类型", "format_template_ref": "对应的投标文件格式名称（如有）" }] }],
   "material_checklist": [{ "requirement_text": "要求原文", "requirement_type": "hard|soft", "material_name": "单项材料名称", "material_format": "分类", "severity": "error|warning|info" }],
   "personnel_plan": [{ "role": "岗位", "requirements": "要求", "suggested_candidate": "人选", "match_reason": "理由" }],
-  "overall_strategy": "策略建议（200字以内）"
+  "overall_strategy": "策略建议（200字以内）",
+  "format_spec": { "font_name": "招标要求的字体（如有）", "font_size_body": "正文字号（如有）", "font_size_heading": "标题字号（如有）", "line_spacing": "行间距（如有）", "page_header": "页眉内容要求（如有）" }
 }`;
 
   if (customPrompt) systemContent += `\n\n【用户自定义要求】\n${customPrompt}`;
