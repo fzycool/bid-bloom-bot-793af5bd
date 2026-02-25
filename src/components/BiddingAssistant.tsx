@@ -675,8 +675,8 @@ export default function BiddingAssistant() {
                       if (user) {
                         setTemplateUploading(true);
                         try {
-                          const safeFileName = encodeURIComponent(file.name);
-                          const path = `${user.id}/templates/${Date.now()}_${safeFileName}`;
+                          const ext = file.name.split('.').pop() || 'docx';
+                          const path = `${user.id}/templates/${Date.now()}_template.${ext}`;
                           const { error: upErr } = await supabase.storage.from("proposal-materials").upload(path, file);
                           if (upErr) throw upErr;
                           setTemplatePath(path);
@@ -836,8 +836,8 @@ export default function BiddingAssistant() {
                         if (user) {
                           setTemplateUploading(true);
                           try {
-                            const safeFileName = encodeURIComponent(file.name);
-                            const path = `${user.id}/templates/${Date.now()}_${safeFileName}`;
+                            const ext = file.name.split('.').pop() || 'docx';
+                            const path = `${user.id}/templates/${Date.now()}_template.${ext}`;
                             await supabase.storage.from("proposal-materials").upload(path, file);
                             setTemplatePath(path);
                             toast({ title: "模板已上传", description: file.name });
