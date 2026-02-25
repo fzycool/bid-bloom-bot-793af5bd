@@ -675,7 +675,8 @@ export default function BiddingAssistant() {
                       if (user) {
                         setTemplateUploading(true);
                         try {
-                          const path = `${user.id}/templates/${Date.now()}_${file.name}`;
+                          const safeFileName = encodeURIComponent(file.name);
+                          const path = `${user.id}/templates/${Date.now()}_${safeFileName}`;
                           const { error: upErr } = await supabase.storage.from("proposal-materials").upload(path, file);
                           if (upErr) throw upErr;
                           setTemplatePath(path);
@@ -835,7 +836,8 @@ export default function BiddingAssistant() {
                         if (user) {
                           setTemplateUploading(true);
                           try {
-                            const path = `${user.id}/templates/${Date.now()}_${file.name}`;
+                            const safeFileName = encodeURIComponent(file.name);
+                            const path = `${user.id}/templates/${Date.now()}_${safeFileName}`;
                             await supabase.storage.from("proposal-materials").upload(path, file);
                             setTemplatePath(path);
                             toast({ title: "模板已上传", description: file.name });
