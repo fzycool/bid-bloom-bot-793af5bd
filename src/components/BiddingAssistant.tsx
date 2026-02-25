@@ -130,6 +130,9 @@ export default function BiddingAssistant() {
   const [expandedFormats, setExpandedFormats] = useState<Set<string>>(new Set());
   const [companyMaterials, setCompanyMaterials] = useState<CompanyMaterialMatch[]>([]);
   const [materialMatchMap, setMaterialMatchMap] = useState<Map<string, CompanyMaterialMatch>>(new Map());
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [templateUploading, setTemplateUploading] = useState(false);
+  const [templatePath, setTemplatePath] = useState<string | null>(null);
   const fetchAnalyses = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
@@ -413,55 +416,109 @@ export default function BiddingAssistant() {
   const handleExportWord = async () => {
     if (!selectedProposal) return;
     const flatSections = flattenSections(sections);
+
+    // Get format spec from AI output if available
+    const formatSpec = parsedOutline?.format_spec || {};
+    const projectTitle = selectedProposal.project_name || "投标文件";
+
+    // Determine font settings: AI-detected > defaults
+    const bodyFont = formatSpec.font_name || "仿宋";
+    const headingFont = formatSpec.font_name || "黑体";
+    const bodySize = parseInt(formatSpec.font_size_body) || 24; // 小四 = 24 half-points
+    const h1Size = parseInt(formatSpec.font_size_heading) || 36; // 小二 = 36
+    const h2Size = 28; // 三号
+    const h3Size = 26; // 小三
+    const lineSpacingVal = parseFloat(formatSpec.line_spacing) || 1.5;
+    const lineSpacing = Math.round(lineSpacingVal * 240);
+
     const children: Paragraph[] = [
       new Paragraph({
-        text: selectedProposal.project_name,
+        text: projectTitle,
         heading: HeadingLevel.TITLE,
         alignment: AlignmentType.CENTER,
+        spacing: { line: lineSpacing },
       }),
       new Paragraph({ text: "" }),
     ];
 
     if (parsedOutline?.overall_strategy) {
       children.push(
-        new Paragraph({ text: "投标策略建议", heading: HeadingLevel.HEADING_1 }),
-        new Paragraph({ text: parsedOutline.overall_strategy }),
+        new Paragraph({
+          text: "投标策略建议",
+          heading: HeadingLevel.HEADING_1,
+          spacing: { line: lineSpacing },
+        }),
+        new Paragraph({
+          children: [new TextRun({ text: parsedOutline.overall_strategy, font: bodyFont, size: bodySize })],
+          spacing: { line: lineSpacing },
+        }),
         new Paragraph({ text: "" }),
       );
     }
 
-    children.push(new Paragraph({ text: "投标文件提纲", heading: HeadingLevel.HEADING_1 }));
+    children.push(new Paragraph({
+      text: "投标文件提纲",
+      heading: HeadingLevel.HEADING_1,
+      spacing: { line: lineSpacing },
+    }));
 
     for (const { section, depth } of flatSections) {
       const heading = depth === 0 ? HeadingLevel.HEADING_2 : depth === 1 ? HeadingLevel.HEADING_3 : HeadingLevel.HEADING_4;
+      const fontSize = depth === 0 ? h2Size : depth === 1 ? h3Size : bodySize;
       const prefix = section.section_number ? `${section.section_number} ` : "";
-      children.push(new Paragraph({ text: `${prefix}${section.title}`, heading }));
+      children.push(new Paragraph({
+        children: [new TextRun({ text: `${prefix}${section.title}`, font: headingFont, size: fontSize, bold: true })],
+        spacing: { line: lineSpacing },
+      }));
       if (section.content) {
-        children.push(new Paragraph({ text: section.content }));
+        children.push(new Paragraph({
+          children: [new TextRun({ text: section.content, font: bodyFont, size: bodySize })],
+          spacing: { line: lineSpacing },
+        }));
       }
     }
 
     if (parsedOutline?.personnel_plan?.length > 0) {
       children.push(new Paragraph({ text: "" }));
-      children.push(new Paragraph({ text: "人员配置建议", heading: HeadingLevel.HEADING_1 }));
+      children.push(new Paragraph({
+        text: "人员配置建议",
+        heading: HeadingLevel.HEADING_1,
+        spacing: { line: lineSpacing },
+      }));
       for (const p of parsedOutline.personnel_plan) {
         children.push(new Paragraph({
           children: [
-            new TextRun({ text: `${p.role}`, bold: true }),
-            new TextRun({ text: ` — ${p.requirements || ""}` }),
+            new TextRun({ text: `${p.role}`, bold: true, font: bodyFont, size: bodySize }),
+            new TextRun({ text: ` — ${p.requirements || ""}`, font: bodyFont, size: bodySize }),
           ],
+          spacing: { line: lineSpacing },
         }));
         if (p.suggested_candidate) {
-          children.push(new Paragraph({ text: `  建议人选: ${p.suggested_candidate}` }));
+          children.push(new Paragraph({
+            children: [new TextRun({ text: `  建议人选: ${p.suggested_candidate}`, font: bodyFont, size: bodySize })],
+            spacing: { line: lineSpacing },
+          }));
         }
       }
     }
 
     const doc = new Document({
-      sections: [{ properties: {}, children }],
+      sections: [{
+        properties: {
+          page: {
+            margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 },
+          },
+        },
+        headers: formatSpec.page_header ? {
+          default: {
+            options: { children: [new Paragraph({ text: formatSpec.page_header || projectTitle, alignment: AlignmentType.CENTER })] },
+          },
+        } : undefined,
+        children,
+      }],
     });
     const blob = await Packer.toBlob(doc);
-    saveAs(blob, `${selectedProposal.project_name || "投标文件"}.docx`);
+    saveAs(blob, `${projectTitle}.docx`);
     toast({ title: "导出成功", description: "投标文件已导出为Word格式" });
   };
 
@@ -597,6 +654,63 @@ export default function BiddingAssistant() {
               <label className="text-sm font-medium text-foreground">自定义提纲生成要求</label>
               <Textarea className="mt-1" rows={3} value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="可选。例如：重点关注技术方案部分，细化实施计划章节..." />
             </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Word模板（可选）</label>
+              <p className="text-xs text-muted-foreground mt-0.5 mb-1.5">上传.docx模板文件，导出时将按模板的字体、字号、行间距格式生成。若不上传，则按招标文件要求或默认格式导出。</p>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".docx"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (!file.name.endsWith(".docx")) {
+                        toast({ title: "格式错误", description: "仅支持.docx格式的模板文件", variant: "destructive" });
+                        return;
+                      }
+                      setTemplateFile(file);
+                      // Upload to storage
+                      if (user) {
+                        setTemplateUploading(true);
+                        try {
+                          const path = `${user.id}/templates/${Date.now()}_${file.name}`;
+                          const { error: upErr } = await supabase.storage.from("proposal-materials").upload(path, file);
+                          if (upErr) throw upErr;
+                          setTemplatePath(path);
+                          toast({ title: "模板上传成功", description: file.name });
+                        } catch (err: any) {
+                          toast({ title: "模板上传失败", description: err.message, variant: "destructive" });
+                          setTemplateFile(null);
+                        } finally {
+                          setTemplateUploading(false);
+                        }
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button variant="outline" size="sm" asChild disabled={templateUploading}>
+                    <span>
+                      {templateUploading ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />上传中...</>
+                      ) : (
+                        <><Upload className="w-3.5 h-3.5 mr-1" />选择模板文件</>
+                      )}
+                    </span>
+                  </Button>
+                </label>
+                {templateFile && (
+                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{templateFile.name}</span>
+                    <button onClick={() => { setTemplateFile(null); setTemplatePath(null); }} className="text-destructive hover:text-destructive/80">
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
             <div className="flex gap-2">
               <Button onClick={handleCreate} disabled={!selectedBidId || generating}>
                 {generating ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />生成中...</> : <><Sparkles className="w-4 h-4 mr-1" />生成投标提纲</>}
@@ -704,7 +818,7 @@ export default function BiddingAssistant() {
 
               {/* Outline tab */}
               <TabsContent value="outline" className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   {selectedProposal.token_usage && (
                     <div className="flex items-center gap-4 text-xs text-muted-foreground px-1">
                       <span>🔤 Prompt: {formatTokenCount(selectedProposal.token_usage.prompt_tokens)}</span>
@@ -712,10 +826,48 @@ export default function BiddingAssistant() {
                       <span className="font-medium text-foreground">📊 Total: {formatTokenCount(selectedProposal.token_usage.total_tokens)}</span>
                     </div>
                   )}
-                  <Button variant="outline" size="sm" onClick={handleExportWord} disabled={sections.length === 0}>
-                    <Download className="w-4 h-4 mr-1" />导出Word
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer">
+                      <input type="file" className="hidden" accept=".docx" onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file || !file.name.endsWith(".docx")) { toast({ title: "仅支持.docx格式", variant: "destructive" }); return; }
+                        setTemplateFile(file);
+                        if (user) {
+                          setTemplateUploading(true);
+                          try {
+                            const path = `${user.id}/templates/${Date.now()}_${file.name}`;
+                            await supabase.storage.from("proposal-materials").upload(path, file);
+                            setTemplatePath(path);
+                            toast({ title: "模板已上传", description: file.name });
+                          } catch (err: any) { toast({ title: "上传失败", description: err.message, variant: "destructive" }); setTemplateFile(null); }
+                          finally { setTemplateUploading(false); }
+                        }
+                        e.target.value = "";
+                      }} />
+                      <Button variant="ghost" size="sm" asChild disabled={templateUploading}>
+                        <span>{templateFile ? <><FileText className="w-3.5 h-3.5 mr-1" />{templateFile.name}</> : <><Upload className="w-3.5 h-3.5 mr-1" />上传模板</>}</span>
+                      </Button>
+                    </label>
+                    <Button variant="outline" size="sm" onClick={handleExportWord} disabled={sections.length === 0}>
+                      <Download className="w-4 h-4 mr-1" />导出Word
+                    </Button>
+                  </div>
                 </div>
+
+                {parsedOutline?.format_spec && (parsedOutline.format_spec.font_name || parsedOutline.format_spec.line_spacing) && (
+                  <Card>
+                    <CardContent className="pt-4">
+                      <p className="text-sm font-medium text-foreground mb-1">📐 招标文件格式要求</p>
+                      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                        {parsedOutline.format_spec.font_name && <span>字体: {parsedOutline.format_spec.font_name}</span>}
+                        {parsedOutline.format_spec.font_size_body && <span>正文字号: {parsedOutline.format_spec.font_size_body}</span>}
+                        {parsedOutline.format_spec.font_size_heading && <span>标题字号: {parsedOutline.format_spec.font_size_heading}</span>}
+                        {parsedOutline.format_spec.line_spacing && <span>行间距: {parsedOutline.format_spec.line_spacing}</span>}
+                        {parsedOutline.format_spec.page_header && <span>页眉: {parsedOutline.format_spec.page_header}</span>}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {parsedOutline?.overall_strategy && (
                   <Card>
