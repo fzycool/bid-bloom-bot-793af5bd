@@ -20,13 +20,22 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Head
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
 
+interface HeadingStyle {
+  font?: string;
+  size?: number;
+  bold?: boolean;
+  spaceBefore?: number;
+  spaceAfter?: number;
+  lineSpacing?: number;
+}
+
 interface TemplateStyles {
-  body: { font?: string; size?: number; lineSpacing?: number };
-  heading1: { font?: string; size?: number; bold?: boolean };
-  heading2: { font?: string; size?: number; bold?: boolean };
-  heading3: { font?: string; size?: number; bold?: boolean };
-  heading4: { font?: string; size?: number; bold?: boolean };
-  title: { font?: string; size?: number; bold?: boolean };
+  body: { font?: string; size?: number; lineSpacing?: number; spaceBefore?: number; spaceAfter?: number };
+  heading1: HeadingStyle;
+  heading2: HeadingStyle;
+  heading3: HeadingStyle;
+  heading4: HeadingStyle;
+  title: HeadingStyle;
   pageMargin?: { top?: number; bottom?: number; left?: number; right?: number };
 }
 
@@ -117,12 +126,16 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
           if (spacing) {
             const lineVal = spacing.getAttributeNS(ns, "line") || spacing.getAttribute("w:line");
             if (lineVal) styles.body.lineSpacing = parseInt(lineVal);
+            const beforeVal = spacing.getAttributeNS(ns, "before") || spacing.getAttribute("w:before");
+            if (beforeVal) styles.body.spaceBefore = parseInt(beforeVal);
+            const afterVal = spacing.getAttributeNS(ns, "after") || spacing.getAttribute("w:after");
+            if (afterVal) styles.body.spaceAfter = parseInt(afterVal);
           }
         }
       }
 
       if (target && target !== "body" && target !== "pageMargin") {
-        const tgt = styles[target] as { font?: string; size?: number; bold?: boolean };
+        const tgt = styles[target] as HeadingStyle;
         const rPr = el.getElementsByTagNameNS(ns, "rPr")[0];
         if (rPr) {
           const sz = rPr.getElementsByTagNameNS(ns, "sz")[0];
@@ -136,6 +149,19 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
           if (bold) {
             const bVal = bold.getAttributeNS(ns, "val") || bold.getAttribute("w:val");
             tgt.bold = bVal !== "0" && bVal !== "false";
+          }
+        }
+        // Extract paragraph spacing for headings
+        const pPr = el.getElementsByTagNameNS(ns, "pPr")[0];
+        if (pPr) {
+          const spacing = pPr.getElementsByTagNameNS(ns, "spacing")[0];
+          if (spacing) {
+            const beforeVal = spacing.getAttributeNS(ns, "before") || spacing.getAttribute("w:before");
+            if (beforeVal) tgt.spaceBefore = parseInt(beforeVal);
+            const afterVal = spacing.getAttributeNS(ns, "after") || spacing.getAttribute("w:after");
+            if (afterVal) tgt.spaceAfter = parseInt(afterVal);
+            const lineVal = spacing.getAttributeNS(ns, "line") || spacing.getAttribute("w:line");
+            if (lineVal) tgt.lineSpacing = parseInt(lineVal);
           }
         }
       }
@@ -1683,6 +1709,45 @@ export default function BiddingAssistant() {
                   </div>
                 )}
               </div>
+              {/* Display parsed template styles */}
+              {templateStyles && (
+                <div className="mt-3 p-3 rounded-lg bg-secondary/50 border border-border">
+                  <p className="text-xs font-medium text-foreground mb-2">📋 模板样式解析结果</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                    {([
+                      ["正文", templateStyles.body],
+                      ["标题", templateStyles.title],
+                      ["一级标题", templateStyles.heading1],
+                      ["二级标题", templateStyles.heading2],
+                      ["三级标题", templateStyles.heading3],
+                      ["四级标题", templateStyles.heading4],
+                    ] as [string, HeadingStyle][]).filter(([, s]) => s.font || s.size).map(([label, s]) => (
+                      <div key={label} className="flex items-baseline gap-1">
+                        <span className="font-medium text-foreground">{label}:</span>
+                        <span>
+                          {s.font && s.font}
+                          {s.size ? ` ${s.size / 2}pt` : ""}
+                          {(s as HeadingStyle).bold ? " 加粗" : ""}
+                          {(s as HeadingStyle).spaceBefore ? ` 段前${(s as HeadingStyle).spaceBefore! / 20}pt` : ""}
+                          {(s as HeadingStyle).spaceAfter ? ` 段后${(s as HeadingStyle).spaceAfter! / 20}pt` : ""}
+                          {(s as any).lineSpacing ? ` 行距${((s as any).lineSpacing / 240).toFixed(1)}倍` : ""}
+                        </span>
+                      </div>
+                    ))}
+                    {templateStyles.pageMargin && (
+                      <div className="col-span-2 flex items-baseline gap-1">
+                        <span className="font-medium text-foreground">页边距:</span>
+                        <span>
+                          上{((templateStyles.pageMargin.top || 0) / 567).toFixed(1)}cm
+                          {" "}下{((templateStyles.pageMargin.bottom || 0) / 567).toFixed(1)}cm
+                          {" "}左{((templateStyles.pageMargin.left || 0) / 567).toFixed(1)}cm
+                          {" "}右{((templateStyles.pageMargin.right || 0) / 567).toFixed(1)}cm
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <Button onClick={handleCreate} disabled={!selectedBidId || generating}>
