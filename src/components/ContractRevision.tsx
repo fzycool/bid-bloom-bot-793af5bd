@@ -41,6 +41,8 @@ const ContractRevision = () => {
   const [instructions, setInstructions] = useState("");
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState("");
 
   // PDF rendering state
   const [renderingPages, setRenderingPages] = useState(false);
@@ -169,19 +171,27 @@ const ContractRevision = () => {
     }
   };
 
+
   const handleDownload = async (revision: Revision) => {
     const aiResult = revision.ai_result as any;
 
     // Image-based result: download page images and create PDF
     if (aiResult?.final_page_paths) {
+      setDownloading(true);
       try {
-        toast({ title: "正在生成修订版PDF..." });
+        const paths = aiResult.final_page_paths as string[];
+        setDownloadProgress(`正在获取签名链接 (0/${paths.length})...`);
+        
         const imageUrls: string[] = [];
-
-        for (const pagePath of aiResult.final_page_paths) {
-          const { data } = await supabase.storage
+        for (let i = 0; i < paths.length; i++) {
+          setDownloadProgress(`正在获取签名链接 (${i + 1}/${paths.length})...`);
+          const { data, error } = await supabase.storage
             .from("contract-files")
-            .createSignedUrl(pagePath, 300);
+            .createSignedUrl(paths[i], 600);
+          if (error) {
+            console.error(`Signed URL error for page ${i + 1}:`, error);
+            continue;
+          }
           if (data?.signedUrl) {
             imageUrls.push(data.signedUrl);
           }
@@ -189,22 +199,31 @@ const ContractRevision = () => {
 
         if (imageUrls.length === 0) {
           toast({ title: "无法获取修订页面", variant: "destructive" });
+          setDownloading(false);
+          setDownloadProgress("");
           return;
         }
 
+        setDownloadProgress(`正在下载并生成PDF (${imageUrls.length}页)...`);
         const pdfBlob = await imagesToPdf(imageUrls);
+        
         const url = URL.createObjectURL(pdfBlob);
         const a = document.createElement("a");
         a.href = url;
         a.download = revision.original_file_name.replace(/\.pdf$/i, "_修订版.pdf");
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        return;
+        toast({ title: "下载完成" });
       } catch (err: any) {
         console.error("PDF generation error:", err);
         toast({ title: "PDF生成失败: " + err.message, variant: "destructive" });
-        return;
+      } finally {
+        setDownloading(false);
+        setDownloadProgress("");
       }
+      return;
     }
 
     // Legacy: direct file download
@@ -373,6 +392,12 @@ const ContractRevision = () => {
       {/* Revision History */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">修订记录</h3>
+        {downloading && downloadProgress && (
+          <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">{downloadProgress}</span>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -415,9 +440,19 @@ const ContractRevision = () => {
                           variant="outline"
                           size="sm"
                           onClick={() => handleDownload(rev)}
+                          disabled={downloading}
                         >
-                          <Download className="w-3.5 h-3.5 mr-1" />
-                          下载
+                          {downloading ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                              生成中
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3.5 h-3.5 mr-1" />
+                              下载
+                            </>
+                          )}
                         </Button>
                       )}
                       <Button
