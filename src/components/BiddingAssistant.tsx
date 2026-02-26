@@ -877,172 +877,97 @@ export default function BiddingAssistant() {
     );
   };
 
+  const [reuseMode, setReuseMode] = useState(false);
+  const [reuseSourceId, setReuseSourceId] = useState("");
+
+  const handleReuseCreate = async () => {
+    if (!user || !reuseSourceId) return;
+    setGenerating(true);
+    try {
+      const source = proposals.find(p => p.id === reuseSourceId);
+      if (!source) throw new Error("找不到源标书");
+      const name = projectName.trim() || `${source.project_name} (复用)`;
+
+      // Create new proposal
+      const { data: newProposal, error } = await supabase
+        .from("bid_proposals")
+        .insert({
+          user_id: user.id,
+          bid_analysis_id: source.bid_analysis_id,
+          project_name: name,
+          custom_prompt: source.custom_prompt,
+          outline_content: source.outline_content,
+          ai_status: "completed",
+          status: "draft",
+        } as any)
+        .select()
+        .single();
+      if (error || !newProposal) throw error || new Error("创建失败");
+
+      // Copy sections
+      const { data: sourceSections } = await supabase
+        .from("proposal_sections")
+        .select("*")
+        .eq("proposal_id", source.id)
+        .order("sort_order");
+      if (sourceSections && sourceSections.length > 0) {
+        const idMap = new Map<string, string>();
+        for (const s of sourceSections) {
+          const newId = crypto.randomUUID();
+          idMap.set(s.id, newId);
+        }
+        const newSections = sourceSections.map((s: any) => ({
+          id: idMap.get(s.id),
+          proposal_id: (newProposal as any).id,
+          title: s.title,
+          content: s.content,
+          section_number: s.section_number,
+          sort_order: s.sort_order,
+          parent_id: s.parent_id ? idMap.get(s.parent_id) || null : null,
+          source_type: s.source_type,
+          source_id: s.source_id,
+        }));
+        await supabase.from("proposal_sections").insert(newSections as any);
+      }
+
+      toast({ title: "复用成功", description: `已创建新标书: ${name}` });
+      setReuseMode(false);
+      setReuseSourceId("");
+      setProjectName("");
+      fetchProposals();
+      setSelectedProposal(newProposal as any);
+    } catch (e: any) {
+      toast({ title: "复用失败", description: e.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   // ---- RENDER ----
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-foreground">智能投标助手</h2>
-          <p className="text-sm text-muted-foreground mt-1">根据招标解析自动生成投标提纲，智能检查证明材料</p>
-        </div>
-        <Button onClick={() => setCreating(true)} disabled={creating}>
-          <Plus className="w-4 h-4 mr-1" /> 新建投标方案
-        </Button>
-      </div>
 
-      {/* Create form */}
-      {creating && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">新建投标方案</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-foreground">关联招标解析 *</label>
-              <Select value={selectedBidId} onValueChange={setSelectedBidId}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="选择已完成的招标解析" /></SelectTrigger>
-                <SelectContent>
-                  {analyses.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.project_name || "未命名"}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+  // Detail view - when a proposal is selected
+  if (selectedProposal) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedProposal(null); setSections([]); setMaterials([]); }}>
+            ← 返回列表
+          </Button>
+          <div className="flex-1">
+            <h2 className="text-xl font-bold text-foreground">{selectedProposal.project_name}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <Badge variant={selectedProposal.ai_status === "completed" ? "default" : selectedProposal.ai_status === "processing" ? "secondary" : "outline"} className="text-xs">
+                {selectedProposal.ai_status === "completed" ? "提纲已完成" : selectedProposal.ai_status === "processing" ? "生成中" : selectedProposal.ai_status === "failed" ? "失败" : "待处理"}
+              </Badge>
+              <span className="text-xs text-muted-foreground">{new Date(selectedProposal.created_at).toLocaleDateString()}</span>
             </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">方案名称</label>
-              <Input className="mt-1" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="可选，默认使用招标项目名" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">自定义提纲生成要求</label>
-              <Textarea className="mt-1" rows={3} value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="可选。例如：重点关注技术方案部分，细化实施计划章节..." />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">Word模板（可选）</label>
-              <p className="text-xs text-muted-foreground mt-0.5 mb-1.5">上传.docx模板文件，导出时将按模板的字体、字号、行间距格式生成。若不上传，则按招标文件要求或默认格式导出。</p>
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer">
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".docx"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      if (!file.name.endsWith(".docx")) {
-                        toast({ title: "格式错误", description: "仅支持.docx格式的模板文件", variant: "destructive" });
-                        return;
-                      }
-                      setTemplateFile(file);
-                      // Parse template styles
-                      try {
-                        const parsed = await parseTemplateStyles(file);
-                        setTemplateStyles(parsed);
-                        console.log("Parsed template styles:", parsed);
-                      } catch (err) { console.warn("Failed to parse template styles:", err); }
-                      // Upload to storage
-                      if (user) {
-                        setTemplateUploading(true);
-                        try {
-                          const ext = file.name.split('.').pop() || 'docx';
-                          const path = `${user.id}/templates/${Date.now()}_template.${ext}`;
-                          const { error: upErr } = await supabase.storage.from("proposal-materials").upload(path, file);
-                          if (upErr) throw upErr;
-                          setTemplatePath(path);
-                          toast({ title: "模板上传成功", description: `已解析模板样式: ${file.name}` });
-                        } catch (err: any) {
-                          toast({ title: "模板上传失败", description: err.message, variant: "destructive" });
-                          setTemplateFile(null);
-                        } finally {
-                          setTemplateUploading(false);
-                        }
-                      }
-                      e.target.value = "";
-                    }}
-                  />
-                  <Button variant="outline" size="sm" asChild disabled={templateUploading}>
-                    <span>
-                      {templateUploading ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />上传中...</>
-                      ) : (
-                        <><Upload className="w-3.5 h-3.5 mr-1" />选择模板文件</>
-                      )}
-                    </span>
-                  </Button>
-                </label>
-                {templateFile && (
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>{templateFile.name}</span>
-                    <button onClick={() => { setTemplateFile(null); setTemplatePath(null); setTemplateStyles(null); }} className="text-destructive hover:text-destructive/80">
-                      <XCircle className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={handleCreate} disabled={!selectedBidId || generating}>
-                {generating ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />生成中...</> : <><Sparkles className="w-4 h-4 mr-1" />生成投标提纲</>}
-              </Button>
-              <Button variant="outline" onClick={() => setCreating(false)} disabled={generating}>取消</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left: proposal list */}
-        <div className="lg:col-span-1">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">投标方案列表</CardTitle></CardHeader>
-            <CardContent className="p-2">
-              <ScrollArea className="max-h-[500px]">
-                {proposals.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">暂无方案</p>
-                ) : (
-                  <div className="space-y-1">
-                    {proposals.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setSelectedProposal(p)}
-                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors group ${
-                          selectedProposal?.id === p.id
-                            ? "bg-accent text-accent-foreground"
-                            : "hover:bg-secondary text-foreground"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium flex-1 break-words whitespace-normal">{p.project_name}</span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
-                            className="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <Badge variant={p.ai_status === "completed" ? "default" : p.ai_status === "processing" ? "secondary" : "outline"} className="text-[10px] px-1.5 py-0">
-                            {p.ai_status === "completed" ? "已完成" : p.ai_status === "processing" ? "生成中" : p.ai_status === "failed" ? "失败" : "待处理"}
-                          </Badge>
-                          <span className="text-[10px] text-muted-foreground">{new Date(p.created_at).toLocaleDateString()}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => handleDelete(selectedProposal.id)}>
+            <Trash2 className="w-4 h-4 mr-1" /> 删除
+          </Button>
         </div>
 
-        {/* Right: proposal details */}
-        <div className="lg:col-span-3">
-          {!selectedProposal ? (
-            <Card className="flex items-center justify-center py-20">
-              <div className="text-center text-muted-foreground">
-                <ClipboardCheck className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">选择或新建投标方案</p>
-              </div>
-            </Card>
-          ) : selectedProposal.ai_status === "processing" ? (
+        {selectedProposal.ai_status === "processing" ? (
             <Card className="flex items-center justify-center py-20">
               <div className="text-center space-y-3">
                 <Loader2 className="w-8 h-8 mx-auto animate-spin text-accent" />
@@ -1466,8 +1391,220 @@ export default function BiddingAssistant() {
               </TabsContent>
             </Tabs>
           )}
+      </div>
+    );
+  }
+
+  // ---- LIST VIEW ----
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-foreground">智能投标助手</h2>
+          <p className="text-sm text-muted-foreground mt-1">管理所有投标标书，跟踪标书状态与进度</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setReuseMode(true)} disabled={reuseMode || creating || proposals.length === 0}>
+            <RefreshCw className="w-4 h-4 mr-1" /> 复用原有投标标书
+          </Button>
+          <Button onClick={() => setCreating(true)} disabled={creating || reuseMode}>
+            <Plus className="w-4 h-4 mr-1" /> 新建投标标书
+          </Button>
         </div>
       </div>
+
+      {/* Create form */}
+      {creating && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">新建投标标书</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-foreground">关联招标解析 *</label>
+              <Select value={selectedBidId} onValueChange={setSelectedBidId}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="选择已完成的招标解析" /></SelectTrigger>
+                <SelectContent>
+                  {analyses.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.project_name || "未命名"}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">标书名称</label>
+              <Input className="mt-1" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="可选，默认使用招标项目名" />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">自定义提纲生成要求</label>
+              <Textarea className="mt-1" rows={3} value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="可选。例如：重点关注技术方案部分，细化实施计划章节..." />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Word模板（可选）</label>
+              <p className="text-xs text-muted-foreground mt-0.5 mb-1.5">上传.docx模板文件，导出时将按模板的字体、字号、行间距格式生成。</p>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".docx"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (!file.name.endsWith(".docx")) {
+                        toast({ title: "格式错误", description: "仅支持.docx格式的模板文件", variant: "destructive" });
+                        return;
+                      }
+                      setTemplateFile(file);
+                      try {
+                        const parsed = await parseTemplateStyles(file);
+                        setTemplateStyles(parsed);
+                      } catch (err) { console.warn("Failed to parse template styles:", err); }
+                      if (user) {
+                        setTemplateUploading(true);
+                        try {
+                          const ext = file.name.split('.').pop() || 'docx';
+                          const path = `${user.id}/templates/${Date.now()}_template.${ext}`;
+                          const { error: upErr } = await supabase.storage.from("proposal-materials").upload(path, file);
+                          if (upErr) throw upErr;
+                          setTemplatePath(path);
+                          toast({ title: "模板上传成功", description: `已解析模板样式: ${file.name}` });
+                        } catch (err: any) {
+                          toast({ title: "模板上传失败", description: err.message, variant: "destructive" });
+                          setTemplateFile(null);
+                        } finally {
+                          setTemplateUploading(false);
+                        }
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button variant="outline" size="sm" asChild disabled={templateUploading}>
+                    <span>
+                      {templateUploading ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />上传中...</>
+                      ) : (
+                        <><Upload className="w-3.5 h-3.5 mr-1" />选择模板文件</>
+                      )}
+                    </span>
+                  </Button>
+                </label>
+                {templateFile && (
+                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{templateFile.name}</span>
+                    <button onClick={() => { setTemplateFile(null); setTemplatePath(null); setTemplateStyles(null); }} className="text-destructive hover:text-destructive/80">
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleCreate} disabled={!selectedBidId || generating}>
+                {generating ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />生成中...</> : <><Sparkles className="w-4 h-4 mr-1" />生成投标提纲</>}
+              </Button>
+              <Button variant="outline" onClick={() => setCreating(false)} disabled={generating}>取消</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Reuse form */}
+      {reuseMode && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">复用原有投标标书</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-foreground">选择要复用的标书 *</label>
+              <Select value={reuseSourceId} onValueChange={setReuseSourceId}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="选择一个已有标书" /></SelectTrigger>
+                <SelectContent>
+                  {proposals.filter(p => p.ai_status === "completed").map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.project_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">新标书名称</label>
+              <Input className="mt-1" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="可选，默认在原名后加 (复用)" />
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleReuseCreate} disabled={!reuseSourceId || generating}>
+                {generating ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />复用中...</> : <><RefreshCw className="w-4 h-4 mr-1" />确认复用</>}
+              </Button>
+              <Button variant="outline" onClick={() => { setReuseMode(false); setReuseSourceId(""); setProjectName(""); }} disabled={generating}>取消</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Bid list table */}
+      <Card>
+        <CardContent className="p-0">
+          {proposals.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <ClipboardCheck className="w-10 h-10 mb-3 opacity-40" />
+              <p className="text-sm">暂无投标标书，点击右上角新建</p>
+            </div>
+          ) : (
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">标书名称</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">状态</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">方案状态</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">创建日期</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {proposals.map((p) => (
+                    <tr
+                      key={p.id}
+                      className="border-b border-border/50 hover:bg-secondary/50 cursor-pointer transition-colors"
+                      onClick={() => setSelectedProposal(p)}
+                    >
+                      <td className="px-4 py-3">
+                        <span className="font-medium text-foreground">{p.project_name}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={p.ai_status === "completed" ? "default" : p.ai_status === "processing" ? "secondary" : p.ai_status === "failed" ? "destructive" : "outline"} className="text-xs">
+                          {p.ai_status === "completed" ? "提纲完成" : p.ai_status === "processing" ? "生成中" : p.ai_status === "failed" ? "失败" : "待处理"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={
+                          (p as any).proposal_doc_status === "completed" ? "default" :
+                          (p as any).proposal_doc_status === "processing" ? "secondary" :
+                          (p as any).proposal_doc_status === "failed" ? "destructive" : "outline"
+                        } className="text-xs">
+                          {(p as any).proposal_doc_status === "completed" ? "方案完成" :
+                           (p as any).proposal_doc_status === "processing" ? "生成中" :
+                           (p as any).proposal_doc_status === "failed" ? "失败" : "待生成"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {new Date(p.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSelectedProposal(p); }}>
+                            <ChevronRight className="w-4 h-4" /> 查看
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }} className="text-destructive hover:text-destructive">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
