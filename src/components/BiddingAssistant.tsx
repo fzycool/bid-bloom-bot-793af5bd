@@ -275,6 +275,7 @@ export default function BiddingAssistant() {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [uploadingMaterialId, setUploadingMaterialId] = useState<string | null>(null);
   const [expandedFormats, setExpandedFormats] = useState<Set<string>>(new Set());
+  const [autoFilling, setAutoFilling] = useState(false);
   const [companyMaterials, setCompanyMaterials] = useState<CompanyMaterialMatch[]>([]);
   const [materialMatchMap, setMaterialMatchMap] = useState<Map<string, CompanyMaterialMatch>>(new Map());
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -558,6 +559,53 @@ export default function BiddingAssistant() {
       toast({ title: "上传失败", description: e.message, variant: "destructive" });
     } finally {
       setUploadingMaterialId(null);
+    }
+  };
+
+  const handleAutoFillMaterials = async () => {
+    if (!user || !selectedProposal || materialMatchMap.size === 0) return;
+    setAutoFilling(true);
+    let filled = 0;
+    try {
+      for (const [pmId, cm] of materialMatchMap.entries()) {
+        const pm = materials.find(m => m.id === pmId);
+        // Skip already uploaded/matched items
+        if (!pm || pm.status === "uploaded" || pm.status === "matched") continue;
+
+        // Download company material file
+        const { data: fileData, error: dlErr } = await supabase.storage
+          .from("company-materials")
+          .download(cm.file_path);
+        if (dlErr || !fileData) {
+          console.warn("Failed to download company material:", cm.file_path, dlErr);
+          continue;
+        }
+
+        // Upload to proposal-materials bucket
+        const ext = cm.file_name.split(".").pop() || "png";
+        const destPath = `${user.id}/${selectedProposal.id}/${pmId}_${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("proposal-materials")
+          .upload(destPath, fileData);
+        if (upErr) {
+          console.warn("Failed to upload to proposal-materials:", upErr);
+          continue;
+        }
+
+        // Update proposal_materials record
+        await supabase
+          .from("proposal_materials")
+          .update({ status: "uploaded", matched_file_path: destPath, matched_document_id: null })
+          .eq("id", pmId);
+        filled++;
+      }
+
+      toast({ title: "自动补齐完成", description: `已从公司材料库自动填充 ${filled} 项材料` });
+      await fetchProposalDetails(selectedProposal.id);
+    } catch (e: any) {
+      toast({ title: "自动补齐失败", description: e.message, variant: "destructive" });
+    } finally {
+      setAutoFilling(false);
     }
   };
 
@@ -1080,10 +1128,18 @@ export default function BiddingAssistant() {
                     <span className="flex items-center gap-1"><AlertTriangle className="w-4 h-4 text-yellow-500" />软性缺失 {softMissing.length}</span>
                     <span className="flex items-center gap-1"><CheckCircle className="w-4 h-4 text-green-500" />已匹配 {matched.length}</span>
                   </div>
-                  <Button variant="outline" size="sm" onClick={handleCheckMaterials} disabled={checking}>
-                    {checking ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Search className="w-4 h-4 mr-1" />}
-                    重新检查
-                  </Button>
+                  <div className="flex gap-2">
+                    {materialMatchMap.size > 0 && (
+                      <Button variant="default" size="sm" onClick={handleAutoFillMaterials} disabled={autoFilling}>
+                        {autoFilling ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Sparkles className="w-4 h-4 mr-1" />}
+                        自动补齐 ({materialMatchMap.size})
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={handleCheckMaterials} disabled={checking}>
+                      {checking ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Search className="w-4 h-4 mr-1" />}
+                      重新检查
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Hard requirements - grouped by format, collapsible */}
