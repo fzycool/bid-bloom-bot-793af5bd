@@ -1551,9 +1551,9 @@ export default function BiddingAssistant() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/30">
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">标书名称</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">状态</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">方案状态</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground max-w-[200px]">标书名称</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">提纲状态</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">方案状态</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">创建日期</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">操作</th>
                   </tr>
@@ -1565,15 +1565,15 @@ export default function BiddingAssistant() {
                       className="border-b border-border/50 hover:bg-secondary/50 cursor-pointer transition-colors"
                       onClick={() => setSelectedProposal(p)}
                     >
-                      <td className="px-4 py-3">
-                        <span className="font-medium text-foreground">{p.project_name}</span>
+                      <td className="px-4 py-3 max-w-[200px]">
+                        <span className="font-medium text-foreground line-clamp-2">{p.project_name}</span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <Badge variant={p.ai_status === "completed" ? "default" : p.ai_status === "processing" ? "secondary" : p.ai_status === "failed" ? "destructive" : "outline"} className="text-xs">
                           {p.ai_status === "completed" ? "提纲完成" : p.ai_status === "processing" ? "生成中" : p.ai_status === "failed" ? "失败" : "待处理"}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <Badge variant={
                           (p as any).proposal_doc_status === "completed" ? "default" :
                           (p as any).proposal_doc_status === "processing" ? "secondary" :
