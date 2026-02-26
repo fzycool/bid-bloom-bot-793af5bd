@@ -16,7 +16,7 @@ import {
   ClipboardCheck, Trash2, Search, Sparkles, Download, Upload, Paperclip,
   ShieldCheck, AlertCircle, Clock, Image as ImageIcon, UserPlus, X,
 } from "lucide-react";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Header, Footer, LevelFormat, convertInchesToTwip } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Header, Footer, LevelFormat, convertInchesToTwip, LevelSuffix } from "docx";
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
 
@@ -863,22 +863,26 @@ export default function BiddingAssistant() {
     const pgLeft = margins.left || 1440;
     const pgRight = margins.right || 1440;
 
-    // Helper to create a heading paragraph with full style
-    const makeHeading = (text: string, level: "title" | 0 | 1 | 2 | 3) => {
+    // Multi-level numbering reference ID
+    const NUMBERING_REF = "outline-numbering";
+
+    // Helper to create a heading paragraph with full style + multi-level numbering
+    const makeHeading = (text: string, level: "title" | 0 | 1 | 2 | 3, useNumbering = true) => {
       const config = level === "title"
-        ? { font: titleFont, size: titleSize, bold: titleBold, color: titleColor, before: titleSpaceBefore, after: titleSpaceAfter, line: titleLineSpacing, heading: undefined as any }
+        ? { font: titleFont, size: titleSize, bold: titleBold, color: titleColor, before: titleSpaceBefore, after: titleSpaceAfter, line: titleLineSpacing, heading: undefined as any, numLevel: -1 }
         : level === 0
-        ? { font: h1Font, size: h1Size, bold: h1Bold, color: h1Color, before: h1SpaceBefore, after: h1SpaceAfter, line: h1LineSpacing, heading: HeadingLevel.HEADING_1 }
+        ? { font: h1Font, size: h1Size, bold: h1Bold, color: h1Color, before: h1SpaceBefore, after: h1SpaceAfter, line: h1LineSpacing, heading: HeadingLevel.HEADING_1, numLevel: 0 }
         : level === 1
-        ? { font: h2Font, size: h2Size, bold: h2Bold, color: h2Color, before: h2SpaceBefore, after: h2SpaceAfter, line: h2LineSpacing, heading: HeadingLevel.HEADING_2 }
+        ? { font: h2Font, size: h2Size, bold: h2Bold, color: h2Color, before: h2SpaceBefore, after: h2SpaceAfter, line: h2LineSpacing, heading: HeadingLevel.HEADING_2, numLevel: 1 }
         : level === 2
-        ? { font: h3Font, size: h3Size, bold: h3Bold, color: h3Color, before: h3SpaceBefore, after: h3SpaceAfter, line: h3LineSpacing, heading: HeadingLevel.HEADING_3 }
-        : { font: h4Font, size: h4Size, bold: h4Bold, color: h4Color, before: h4SpaceBefore, after: h4SpaceAfter, line: h4LineSpacing, heading: HeadingLevel.HEADING_4 };
+        ? { font: h3Font, size: h3Size, bold: h3Bold, color: h3Color, before: h3SpaceBefore, after: h3SpaceAfter, line: h3LineSpacing, heading: HeadingLevel.HEADING_3, numLevel: 2 }
+        : { font: h4Font, size: h4Size, bold: h4Bold, color: h4Color, before: h4SpaceBefore, after: h4SpaceAfter, line: h4LineSpacing, heading: HeadingLevel.HEADING_4, numLevel: 3 };
       return new Paragraph({
         children: [new TextRun({ text, font: config.font, size: config.size, bold: config.bold, color: config.color })],
         heading: config.heading,
         spacing: { before: config.before, after: config.after, line: config.line },
         alignment: level === "title" ? AlignmentType.CENTER : undefined,
+        numbering: (useNumbering && config.numLevel >= 0) ? { reference: NUMBERING_REF, level: config.numLevel } : undefined,
       });
     };
 
@@ -894,18 +898,18 @@ export default function BiddingAssistant() {
 
     if (parsedOutline?.overall_strategy) {
       children.push(
-        makeHeading("投标策略建议", 0),
+        makeHeading("投标策略建议", 0, false),
         makeBody(parsedOutline.overall_strategy),
         new Paragraph({ text: "" }),
       );
     }
 
-    children.push(makeHeading("投标文件提纲", 0));
+    children.push(makeHeading("投标文件提纲", 0, false));
 
     for (const { section, depth } of flatSections) {
       const level = Math.min(depth, 3) as 0 | 1 | 2 | 3;
-      const prefix = section.section_number ? `${section.section_number} ` : "";
-      children.push(makeHeading(`${prefix}${section.title}`, level));
+      // Don't include section_number prefix since multi-level numbering auto-generates it
+      children.push(makeHeading(section.title, level));
       if (section.content) {
         children.push(makeBody(section.content));
       }
@@ -913,7 +917,7 @@ export default function BiddingAssistant() {
 
     if (parsedOutline?.personnel_plan?.length > 0) {
       children.push(new Paragraph({ text: "" }));
-      children.push(makeHeading("人员配置建议", 0));
+      children.push(makeHeading("人员配置建议", 0, false));
       for (const p of parsedOutline.personnel_plan) {
         children.push(new Paragraph({
           children: [
@@ -929,6 +933,41 @@ export default function BiddingAssistant() {
     }
 
     const doc = new Document({
+      numbering: {
+        config: [{
+          reference: NUMBERING_REF,
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.DECIMAL,
+              text: "第%1章",
+              alignment: AlignmentType.START,
+              style: { paragraph: { indent: { left: 0, hanging: 0 } } },
+            },
+            {
+              level: 1,
+              format: LevelFormat.DECIMAL,
+              text: "%1.%2",
+              alignment: AlignmentType.START,
+              style: { paragraph: { indent: { left: convertInchesToTwip(0.3), hanging: convertInchesToTwip(0.3) } } },
+            },
+            {
+              level: 2,
+              format: LevelFormat.DECIMAL,
+              text: "%1.%2.%3",
+              alignment: AlignmentType.START,
+              style: { paragraph: { indent: { left: convertInchesToTwip(0.6), hanging: convertInchesToTwip(0.4) } } },
+            },
+            {
+              level: 3,
+              format: LevelFormat.DECIMAL,
+              text: "%1.%2.%3.%4",
+              alignment: AlignmentType.START,
+              style: { paragraph: { indent: { left: convertInchesToTwip(0.9), hanging: convertInchesToTwip(0.5) } } },
+            },
+          ],
+        }],
+      },
       sections: [{
         properties: {
           page: {
