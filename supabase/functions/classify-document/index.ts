@@ -122,7 +122,7 @@ amount_range 示例：100万以下、100-500万、500-1000万、1000万-5000万�
         owner_name: result.owner_name || null,
         doc_year: result.doc_year || null,
         amount_range: result.amount_range || null,
-        tags: result.tags || [],
+        tags: Array.isArray(result.tags) ? result.tags.filter(Boolean) : [],
         ai_summary: result.summary || "",
         ai_status: "completed",
         ai_metadata: result,
