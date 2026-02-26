@@ -188,11 +188,24 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "未�
   };
   requestBody.max_tokens = maxTokens;
 
-  const response = await fetch(aiUrl, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000); // 3 min timeout
+  let response;
+  try {
+    response = await fetch(aiUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } catch (fetchErr: any) {
+    clearTimeout(timeout);
+    const msg = fetchErr?.name === "AbortError" ? "AI调用超时(3分钟)，请重试" : `AI调用失败: ${fetchErr?.message || "网络错误"}`;
+    console.error("AI fetch error:", fetchErr);
+    await supabase.from("bid_proposals").update({ ai_status: "failed", ai_progress: msg } as any).eq("id", proposalId);
+    return;
+  }
+  clearTimeout(timeout);
 
   if (!response.ok) {
     const status = response.status;
