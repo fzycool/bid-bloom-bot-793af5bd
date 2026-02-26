@@ -942,28 +942,44 @@ export default function BiddingAssistant() {
               format: LevelFormat.DECIMAL,
               text: "第%1章",
               alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: 0, hanging: 0 } } },
+              suffix: LevelSuffix.NOTHING,
+              style: {
+                paragraph: { indent: { left: 0, hanging: 0 } },
+                run: { font: h1Font, size: h1Size, bold: h1Bold, color: h1Color },
+              },
             },
             {
               level: 1,
               format: LevelFormat.DECIMAL,
               text: "%1.%2",
               alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: convertInchesToTwip(0.3), hanging: convertInchesToTwip(0.3) } } },
+              suffix: LevelSuffix.SPACE,
+              style: {
+                paragraph: { indent: { left: convertInchesToTwip(0.3), hanging: convertInchesToTwip(0.3) } },
+                run: { font: h2Font, size: h2Size, bold: h2Bold, color: h2Color },
+              },
             },
             {
               level: 2,
               format: LevelFormat.DECIMAL,
               text: "%1.%2.%3",
               alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: convertInchesToTwip(0.6), hanging: convertInchesToTwip(0.4) } } },
+              suffix: LevelSuffix.SPACE,
+              style: {
+                paragraph: { indent: { left: convertInchesToTwip(0.6), hanging: convertInchesToTwip(0.4) } },
+                run: { font: h3Font, size: h3Size, bold: h3Bold, color: h3Color },
+              },
             },
             {
               level: 3,
               format: LevelFormat.DECIMAL,
               text: "%1.%2.%3.%4",
               alignment: AlignmentType.START,
-              style: { paragraph: { indent: { left: convertInchesToTwip(0.9), hanging: convertInchesToTwip(0.5) } } },
+              suffix: LevelSuffix.SPACE,
+              style: {
+                paragraph: { indent: { left: convertInchesToTwip(0.9), hanging: convertInchesToTwip(0.5) } },
+                run: { font: h4Font, size: h4Size, bold: h4Bold, color: h4Color },
+              },
             },
           ],
         }],
@@ -1818,7 +1834,7 @@ export default function BiddingAssistant() {
                           {(s as HeadingStyle).spaceBefore ? ` 段前${(s as HeadingStyle).spaceBefore! / 20}pt` : ""}
                           {(s as HeadingStyle).spaceAfter ? ` 段后${(s as HeadingStyle).spaceAfter! / 20}pt` : ""}
                           {(s as any).lineSpacing ? ` 行距${((s as any).lineSpacing / 240).toFixed(1)}倍` : ""}
-                          {s.color ? ` 颜色#${s.color}` : ""}
+                          {s.color ? <>{" "}<span className="inline-flex items-center gap-0.5"><span className="inline-block w-3 h-3 rounded-sm border border-border" style={{ backgroundColor: `#${s.color}` }} />#{s.color}</span></> : ""}
                         </span>
                       </div>
                     ))}
