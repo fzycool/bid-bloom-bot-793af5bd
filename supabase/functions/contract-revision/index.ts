@@ -65,18 +65,28 @@ Deno.serve(async (req) => {
 
     let aiResponse: string;
 
-    if (modelConfig?.api_key && modelConfig?.base_url) {
-      aiResponse = await callCustomModel(
-        modelConfig,
-        signedUrlData.signedUrl,
-        revision.revision_instructions
-      );
-    } else {
+    // Always use Lovable AI for file-based processing since custom models
+    // (like DeepSeek) typically can't access file URLs directly.
+    // Custom models are used only if no Lovable API key is available.
+    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (lovableApiKey) {
       aiResponse = await callLovableAI(
         signedUrlData.signedUrl,
         revision.revision_instructions
       );
+    } else if (modelConfig?.api_key && modelConfig?.base_url) {
+      aiResponse = await callCustomModel(
+        modelConfig,
+        revision.revision_instructions
+      );
+    } else {
+      throw new Error("No AI provider configured");
     }
+
+    if (!aiResponse || aiResponse.trim() === "") {
+      throw new Error("AI returned empty response");
+    }
+
 
     const modifiedText = aiResponse;
 
@@ -192,11 +202,13 @@ async function callLovableAI(
 
 async function callCustomModel(
   config: any,
-  fileUrl: string,
   instructions: string
 ): Promise<string> {
-  const baseUrl = config.base_url.replace(/\/+$/, "");
-  const url = `${baseUrl}/chat/completions`;
+  let url = config.base_url.replace(/\/+$/, "");
+  // If base_url doesn't already end with /chat/completions, append it
+  if (!url.endsWith("/chat/completions")) {
+    url = `${url}/chat/completions`;
+  }
 
   const response = await fetch(url, {
     method: "POST",
