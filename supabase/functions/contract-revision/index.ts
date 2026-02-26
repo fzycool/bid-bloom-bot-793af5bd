@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode as encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,12 +12,15 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { revisionId } = await req.json();
+  let revisionId: string | undefined;
+
+  try {
+    const body = await req.json();
+    revisionId = body.revisionId;
     if (!revisionId) {
       return new Response(JSON.stringify({ error: "Missing revisionId" }), {
         status: 400,
@@ -24,7 +28,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get revision record
     const { data: revision, error: revError } = await supabase
       .from("contract_revisions")
       .select("*")
@@ -44,30 +47,14 @@ Deno.serve(async (req) => {
       .update({ ai_status: "processing" })
       .eq("id", revisionId);
 
-    // Download original PDF
-    const { data: fileData, error: dlError } = await supabase.storage
+    // Generate a signed URL instead of downloading the file
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from("contract-files")
-      .download(revision.original_file_path);
+      .createSignedUrl(revision.original_file_path, 600); // 10 min expiry
 
-    if (dlError || !fileData) {
-      await supabase
-        .from("contract_revisions")
-        .update({ ai_status: "error", ai_result: { error: "Failed to download file" } })
-        .eq("id", revisionId);
-      return new Response(
-        JSON.stringify({ error: "Failed to download file" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      throw new Error("Failed to create signed URL for file");
     }
-
-    // Convert PDF to base64
-    const arrayBuffer = await fileData.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    let binary = "";
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i]);
-    }
-    const base64Content = btoa(binary);
 
     // Get active model config
     const { data: modelConfig } = await supabase
@@ -76,31 +63,26 @@ Deno.serve(async (req) => {
       .eq("is_active", true)
       .maybeSingle();
 
-    // Determine which AI provider to use
     let aiResponse: string;
 
     if (modelConfig?.api_key && modelConfig?.base_url) {
-      // Use custom model
       aiResponse = await callCustomModel(
         modelConfig,
-        base64Content,
+        signedUrlData.signedUrl,
         revision.revision_instructions
       );
     } else {
-      // Use Lovable AI (Gemini)
       aiResponse = await callLovableAI(
-        base64Content,
+        signedUrlData.signedUrl,
         revision.revision_instructions
       );
     }
 
-    // Parse AI response - extract the full modified contract text
     const modifiedText = aiResponse;
 
-    // Generate a simple PDF from modified text
-    const pdfBytes = generatePDF(modifiedText, revision.original_file_name);
+    // Generate a simple text-based PDF
+    const pdfBytes = generateSimplePDF(modifiedText);
 
-    // Upload revised file
     const revisedPath = revision.original_file_path.replace(
       /\.pdf$/i,
       `_revised_${Date.now()}.pdf`
@@ -113,17 +95,9 @@ Deno.serve(async (req) => {
       });
 
     if (uploadError) {
-      await supabase
-        .from("contract_revisions")
-        .update({ ai_status: "error", ai_result: { error: "Upload failed" } })
-        .eq("id", revisionId);
-      return new Response(
-        JSON.stringify({ error: "Upload revised file failed" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      throw new Error("Upload revised file failed: " + uploadError.message);
     }
 
-    // Update record
     await supabase
       .from("contract_revisions")
       .update({
@@ -142,6 +116,15 @@ Deno.serve(async (req) => {
     );
   } catch (err) {
     console.error("Contract revision error:", err);
+    // Update status to error if we have the revisionId
+    if (revisionId) {
+      try {
+        await supabase
+          .from("contract_revisions")
+          .update({ ai_status: "error", ai_result: { error: err.message || "Unknown error" } })
+          .eq("id", revisionId);
+      } catch (_) { /* ignore cleanup error */ }
+    }
     return new Response(
       JSON.stringify({ error: err.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -150,7 +133,7 @@ Deno.serve(async (req) => {
 });
 
 async function callLovableAI(
-  base64Pdf: string,
+  fileUrl: string,
   instructions: string
 ): Promise<string> {
   const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
@@ -184,7 +167,7 @@ async function callLovableAI(
               type: "file",
               file: {
                 filename: "contract.pdf",
-                file_data: `data:application/pdf;base64,${base64Pdf}`,
+                file_data: fileUrl,
               },
             },
             {
@@ -209,13 +192,12 @@ async function callLovableAI(
 
 async function callCustomModel(
   config: any,
-  base64Pdf: string,
+  fileUrl: string,
   instructions: string
 ): Promise<string> {
   const baseUrl = config.base_url.replace(/\/+$/, "");
   const url = `${baseUrl}/chat/completions`;
 
-  // For custom models, send extracted text approach since they may not support file uploads
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -227,7 +209,7 @@ async function callCustomModel(
       messages: [
         {
           role: "system",
-          content: `你是一个专业的合同修订助手。用户会提供一份合同内容和修改指令。
+          content: `你是一个专业的合同修订助手。用户会提供一份合同的URL和修改指令。
 你需要：
 1. 仔细阅读整份合同
 2. 根据用户的修改指令，精确定位需要修改的条款
@@ -239,7 +221,7 @@ async function callCustomModel(
         },
         {
           role: "user",
-          content: `请按照以下修改指令修改合同：\n\n${instructions}\n\n（合同内容已通过PDF上传，base64长度: ${base64Pdf.length}）`,
+          content: `请按照以下修改指令修改合同：\n\n${instructions}\n\n合同文件URL: ${fileUrl}`,
         },
       ],
       max_tokens: config.max_tokens || 8000,
@@ -255,18 +237,18 @@ async function callCustomModel(
   return data.choices?.[0]?.message?.content || "";
 }
 
-// Simple PDF generator using raw PDF commands
-function generatePDF(text: string, originalName: string): Uint8Array {
+// Minimal PDF generator - ASCII only, keeps memory low
+function generateSimplePDF(text: string): Uint8Array {
   const lines = text.split("\n");
-  const pageHeight = 842; // A4 height in points
-  const pageWidth = 595; // A4 width
-  const margin = 72; // 1 inch margin
-  const lineHeight = 16;
-  const maxCharsPerLine = 38; // For Chinese chars at font size 12
+  const pageHeight = 842;
+  const pageWidth = 595;
+  const margin = 72;
+  const lineHeight = 14;
+  const maxCharsPerLine = 80;
   const usableHeight = pageHeight - 2 * margin;
   const linesPerPage = Math.floor(usableHeight / lineHeight);
 
-  // Wrap long lines
+  // Wrap lines
   const wrappedLines: string[] = [];
   for (const line of lines) {
     if (line.length <= maxCharsPerLine) {
@@ -283,10 +265,8 @@ function generatePDF(text: string, originalName: string): Uint8Array {
   for (let i = 0; i < wrappedLines.length; i += linesPerPage) {
     pages.push(wrappedLines.slice(i, i + linesPerPage));
   }
-
   if (pages.length === 0) pages.push([""]);
 
-  // Build PDF structure
   const objects: string[] = [];
   let objectCount = 0;
 
@@ -296,27 +276,19 @@ function generatePDF(text: string, originalName: string): Uint8Array {
     return objectCount;
   };
 
-  // Object 1: Catalog
   addObject("<< /Type /Catalog /Pages 2 0 R >>");
-
-  // Object 2: Pages (placeholder, will be updated)
   const pagesObjIdx = objects.length;
-  addObject(""); // placeholder
+  addObject("");
 
-  // Create font - use a built-in font
   const fontObjNum = addObject(
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
   );
 
-  // Create pages
   const pageObjNums: number[] = [];
-  const contentObjNums: number[] = [];
 
   for (const pageLines of pages) {
-    // Build content stream - use hex encoding for text to handle potential issues
-    let stream = `BT\n/F1 11 Tf\n${margin} ${pageHeight - margin} Td\n${lineHeight} TL\n`;
+    let stream = `BT\n/F1 10 Tf\n${margin} ${pageHeight - margin} Td\n${lineHeight} TL\n`;
     for (const line of pageLines) {
-      // Escape special PDF characters
       const escaped = line
         .replace(/\\/g, "\\\\")
         .replace(/\(/g, "\\(")
@@ -329,7 +301,6 @@ function generatePDF(text: string, originalName: string): Uint8Array {
     const contentObj = addObject(
       `<< /Length ${streamBytes.length} >>\nstream\n${stream}\nendstream`
     );
-    contentObjNums.push(contentObj);
 
     const pageObj = addObject(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentObj} 0 R /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> >>`
@@ -337,11 +308,9 @@ function generatePDF(text: string, originalName: string): Uint8Array {
     pageObjNums.push(pageObj);
   }
 
-  // Update pages object
   const kidsStr = pageObjNums.map((n) => `${n} 0 R`).join(" ");
   objects[pagesObjIdx] = `2 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${pages.length} >>\nendobj`;
 
-  // Build final PDF
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = [];
 
