@@ -333,7 +333,7 @@ export default function HolographicAudit() {
             </div>
 
             {/* Findings list */}
-            <ScrollArea className="max-h-[600px]">
+            <div>
               <div className="space-y-3">
                 {filtered.length === 0 ? (
                   <Card>
@@ -382,7 +382,7 @@ export default function HolographicAudit() {
                   })
                 )}
               </div>
-            </ScrollArea>
+            </div>
           </>
         )}
       </div>
