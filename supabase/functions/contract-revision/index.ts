@@ -53,17 +53,21 @@ Deno.serve(async (req) => {
       .update({ ai_status: "processing" })
       .eq("id", revisionId);
 
-    // Step 1: Create signed URL for original PDF to analyze
-    const { data: pdfUrlData } = await supabase.storage
-      .from("contract-files")
-      .createSignedUrl(revision.original_file_path, 600);
+    // Step 1: Create signed URLs for page images to analyze
 
-    if (!pdfUrlData?.signedUrl) throw new Error("Failed to create PDF signed URL");
+    // Step 2: Create signed URLs for page images to analyze
+    const pageSignedUrls: string[] = [];
+    for (const pagePath of pageImagePaths) {
+      const { data: pageUrl } = await supabase.storage
+        .from("contract-files")
+        .createSignedUrl(pagePath, 600);
+      if (pageUrl?.signedUrl) pageSignedUrls.push(pageUrl.signedUrl);
+    }
 
-    // Step 2: Analyze which pages need editing
+    // Step 3: Analyze which pages need editing (using page images)
     const edits = await analyzeEdits(
       lovableApiKey,
-      pdfUrlData.signedUrl,
+      pageSignedUrls,
       revision.revision_instructions,
       pageImagePaths.length
     );
@@ -153,10 +157,16 @@ Deno.serve(async (req) => {
 
 async function analyzeEdits(
   apiKey: string,
-  pdfUrl: string,
+  pageImageUrls: string[],
   instructions: string,
   totalPages: number
 ): Promise<Array<{ page_number: number; edit_instruction: string }>> {
+  // Build image content parts for each page
+  const imageContent: any[] = pageImageUrls.map((url, idx) => ({
+    type: "image_url",
+    image_url: { url },
+  }));
+
   const response = await fetch(GATEWAY_URL, {
     method: "POST",
     headers: {
@@ -168,18 +178,15 @@ async function analyzeEdits(
       messages: [
         {
           role: "system",
-          content: `你是一个文档分析助手。用户会提供一份PDF合同和修改指令。你需要分析修改指令，确定需要修改的具体页码（1-${totalPages}）和每页的具体修改内容。`,
+          content: `你是一个文档分析助手。用户会提供一份合同的页面图片（共${totalPages}页，按顺序排列）和修改指令。你需要分析修改指令，确定需要修改的具体页码（1-${totalPages}）和每页的具体修改内容。`,
         },
         {
           role: "user",
           content: [
-            {
-              type: "file",
-              file: { filename: "contract.pdf", file_data: pdfUrl },
-            },
+            ...imageContent,
             {
               type: "text",
-              text: `请分析以下修改指令，确定需要在哪些页面进行修改：\n\n${instructions}`,
+              text: `以上是合同的${totalPages}页图片（按顺序排列）。请分析以下修改指令，确定需要在哪些页面进行修改：\n\n${instructions}`,
             },
           ],
         },
@@ -204,7 +211,7 @@ async function analyzeEdits(
                       },
                       edit_instruction: {
                         type: "string",
-                        description: "该页面的具体修改内容，例如：将第三行的'5%'改为'3%'",
+                        description: "该页面的具体修改内容",
                       },
                     },
                     required: ["page_number", "edit_instruction"],
@@ -226,13 +233,30 @@ async function analyzeEdits(
   }
 
   const data = await response.json();
+  console.log("AI analysis response:", JSON.stringify(data.choices?.[0]?.message).substring(0, 500));
+
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) {
-    throw new Error("AI did not return edit analysis");
+  if (toolCall) {
+    const args = JSON.parse(toolCall.function.arguments);
+    return args.edits || [];
   }
 
-  const args = JSON.parse(toolCall.function.arguments);
-  return args.edits || [];
+  // Fallback: try to parse from text content
+  const textContent = data.choices?.[0]?.message?.content;
+  if (textContent) {
+    console.log("AI returned text instead of tool call, attempting to parse...");
+    try {
+      const jsonMatch = textContent.match(/\{[\s\S]*"edits"[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return parsed.edits || [];
+      }
+    } catch (e) {
+      console.error("Failed to parse text content as edits:", e);
+    }
+  }
+
+  throw new Error("AI did not return edit analysis");
 }
 
 async function editPageImage(
