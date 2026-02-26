@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.extract-material-info]
 verify_jwt = false
+
+[functions.contract-revision]
+verify_jwt = false

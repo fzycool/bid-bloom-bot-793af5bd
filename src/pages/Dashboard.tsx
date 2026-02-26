@@ -24,6 +24,8 @@ import HolographicAudit from "@/components/HolographicAudit";
 import BackendManagement from "@/components/BackendManagement";
 import BidComparison from "@/components/BidComparison";
 import CompanyMaterials from "@/components/CompanyMaterials";
+import ContractRevision from "@/components/ContractRevision";
+import { FilePen } from "lucide-react";
 
 const baseModules = [
   { id: "overview", label: "数据看板", icon: LayoutDashboard },
@@ -32,6 +34,7 @@ const baseModules = [
   { id: "resume", label: "简历工厂", icon: Users },
   { id: "bid", label: "投标助手", icon: ClipboardCheck },
   { id: "audit", label: "全息审查", icon: CheckCircle },
+  { id: "contract", label: "合同修订", icon: FilePen },
   { id: "knowledge", label: "知识库", icon: BookOpen },
   { id: "materials", label: "公司材料", icon: Building2 },
 ];
@@ -136,6 +139,7 @@ const Dashboard = () => {
           {activeModule === "bid" && <BiddingAssistant />}
           {activeModule === "audit" && <HolographicAudit />}
           {activeModule === "materials" && <CompanyMaterials />}
+          {activeModule === "contract" && <ContractRevision />}
           {activeModule === "admin" && isAdmin && <BackendManagement />}
         </main>
       </div>

@@ -302,6 +302,45 @@ export type Database = {
         }
         Relationships: []
       }
+      contract_revisions: {
+        Row: {
+          ai_result: Json | null
+          ai_status: string
+          created_at: string
+          id: string
+          original_file_name: string
+          original_file_path: string
+          revised_file_path: string | null
+          revision_instructions: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_result?: Json | null
+          ai_status?: string
+          created_at?: string
+          id?: string
+          original_file_name: string
+          original_file_path: string
+          revised_file_path?: string | null
+          revision_instructions: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_result?: Json | null
+          ai_status?: string
+          created_at?: string
+          id?: string
+          original_file_name?: string
+          original_file_path?: string
+          revised_file_path?: string | null
+          revision_instructions?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       documents: {
         Row: {
           ai_metadata: Json | null
