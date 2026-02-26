@@ -112,9 +112,9 @@ async function generateProposalDoc(supabase: any, opts: {
       `- ${m.material_name || "未知"} [${m.requirement_type}] 状态:${m.status}`
     ).join("\n");
 
-    // Knowledge base summary
-    const kbSummary = (docs || []).map((d: any) =>
-      `- ${d.file_name} [${d.doc_category || "未分类"}] ${d.ai_summary || ""}`
+    // Knowledge base detailed summary with IDs for citation
+    const kbSummary = (docs || []).map((d: any, idx: number) =>
+      `[KB-${idx + 1}] 文件名:${d.file_name} | 分类:${d.doc_category || "未分类"} | 行业:${d.industry || "未知"} | 摘要:${d.ai_summary || "无"} | 标签:${(d.tags || []).join(",") || "无"}`
     ).join("\n");
 
     // Personnel summary
@@ -142,14 +142,22 @@ async function generateProposalDoc(supabase: any, opts: {
 
       const systemPrompt = `你是资深投标文件撰写专家。请根据以下投标提纲和参考资料，为指定章节撰写详细的投标方案正文内容。
 
-要求：
-1. 内容专业、严谨，符合招投标行业标准
-2. 充分利用提供的知识库资料和人员信息
-3. 对于需要证明材料的部分，注明"（详见附件：XXX）"
-4. 如果章节包含子章节，请按子章节结构分别撰写
-5. 每个子章节内容充实，字数不少于200字
-6. 使用规范的公文语言，避免口语化表达
-7. 直接输出正文内容，不要输出JSON格式`;
+核心要求：
+1. **优先引用知识库**：撰写每段内容时，必须优先从提供的知识库资料中查找相关信息。如果知识库中有相关资料，必须基于该资料撰写，并在该段落末尾用以下格式标注来源：
+   【来源：知识库 - {文件名} - {相关章节/主题}】
+2. **AI补充标注**：如果知识库中没有相关资料，则由你根据专业知识撰写，并在该段落末尾标注：
+   【来源：AI智能生成】
+3. 每个段落都必须有来源标注，不得遗漏
+4. 内容专业、严谨，符合招投标行业标准
+5. 对于需要证明材料的部分，注明"（详见附件：XXX）"
+6. 如果章节包含子章节，请按子章节结构分别撰写
+7. 每个子章节内容充实，字数不少于200字
+8. 使用规范的公文语言，避免口语化表达
+9. 直接输出正文内容，不要输出JSON格式
+
+来源标注示例：
+"本项目拟采用XX技术方案，通过三级质量管控体系确保交付质量。【来源：知识库 - 2024年XX项目技术方案.pdf - 第三章 质量管理】"
+"针对本项目特殊需求，建议增设专项安全巡检机制。【来源：AI智能生成】"`;
 
       const userPrompt = `【项目名称】${proposal.project_name}
 【当前章节】${root.section_number || ""} ${root.title}
@@ -160,13 +168,14 @@ ${bid ? `【项目摘要】${bid.summary || "无"}` : ""}
 ${outlineText}
 【证明材料清单】
 ${materialsSummary || "无"}
-【知识库参考资料】
+【知识库参考资料（请优先引用，并在内容中标注来源编号和文件名）】
 ${kbSummary || "无"}
 【可用人员信息】
 ${personnelSummary || "无"}
 ${parsedOutline?.overall_strategy ? `【投标策略】${parsedOutline.overall_strategy}` : ""}
 
-请为"${root.section_number || ""} ${root.title}"章节${children.length > 0 ? "及其所有子章节" : ""}撰写完整的投标方案正文。`;
+请为"${root.section_number || ""} ${root.title}"章节${children.length > 0 ? "及其所有子章节" : ""}撰写完整的投标方案正文。
+重要提醒：每段内容必须标注来源（知识库文件名+章节 或 AI智能生成），不得遗漏。`;
 
       const requestBody: any = {
         model: aiModel,
