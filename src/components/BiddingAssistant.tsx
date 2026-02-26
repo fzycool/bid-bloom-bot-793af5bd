@@ -24,13 +24,14 @@ interface HeadingStyle {
   font?: string;
   size?: number;
   bold?: boolean;
+  color?: string;
   spaceBefore?: number;
   spaceAfter?: number;
   lineSpacing?: number;
 }
 
 interface TemplateStyles {
-  body: { font?: string; size?: number; lineSpacing?: number; spaceBefore?: number; spaceAfter?: number };
+  body: { font?: string; size?: number; lineSpacing?: number; spaceBefore?: number; spaceAfter?: number; color?: string };
   heading1: HeadingStyle;
   heading2: HeadingStyle;
   heading3: HeadingStyle;
@@ -53,6 +54,16 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
     const doc = parser.parseFromString(xml, "application/xml");
     const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
+    // Helper to extract color from rPr element
+    const extractColor = (rPr: Element): string | undefined => {
+      const color = rPr.getElementsByTagNameNS(ns, "color")[0];
+      if (color) {
+        const val = color.getAttributeNS(ns, "val") || color.getAttribute("w:val");
+        if (val && val !== "auto") return val;
+      }
+      return undefined;
+    };
+
     // Extract default run properties
     const docDefaults = doc.getElementsByTagNameNS(ns, "docDefaults")[0];
     if (docDefaults) {
@@ -67,6 +78,8 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
             styles.body.font = rFonts.getAttributeNS(ns, "eastAsia") || rFonts.getAttribute("w:eastAsia")
               || rFonts.getAttributeNS(ns, "ascii") || rFonts.getAttribute("w:ascii") || undefined;
           }
+          const c = extractColor(rPr);
+          if (c) styles.body.color = c;
         }
       }
       const pPrDefault = docDefaults.getElementsByTagNameNS(ns, "pPrDefault")[0];
@@ -119,6 +132,8 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
               || rFonts.getAttributeNS(ns, "ascii") || rFonts.getAttribute("w:ascii");
             if (f) styles.body.font = f;
           }
+          const c = extractColor(rPr);
+          if (c) styles.body.color = c;
         }
         const pPr = el.getElementsByTagNameNS(ns, "pPr")[0];
         if (pPr) {
@@ -150,6 +165,8 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
             const bVal = bold.getAttributeNS(ns, "val") || bold.getAttribute("w:val");
             tgt.bold = bVal !== "0" && bVal !== "false";
           }
+          const c = extractColor(rPr);
+          if (c) tgt.color = c;
         }
         // Extract paragraph spacing for headings
         const pPr = el.getElementsByTagNameNS(ns, "pPr")[0];
@@ -797,6 +814,7 @@ export default function BiddingAssistant() {
     const bodyLineSpacing = ts?.body?.lineSpacing || Math.round((parseFloat(formatSpec.line_spacing) || 1.5) * 240);
     const bodySpaceBefore = ts?.body?.spaceBefore || 0;
     const bodySpaceAfter = ts?.body?.spaceAfter || 0;
+    const bodyColor = ts?.body?.color || undefined;
 
     const titleFont = ts?.title?.font || formatSpec.font_name || "黑体";
     const titleSize = ts?.title?.size || parseInt(formatSpec.font_size_heading) || 44;
@@ -804,6 +822,7 @@ export default function BiddingAssistant() {
     const titleSpaceBefore = ts?.title?.spaceBefore || 0;
     const titleSpaceAfter = ts?.title?.spaceAfter || 120;
     const titleLineSpacing = ts?.title?.lineSpacing || bodyLineSpacing;
+    const titleColor = ts?.title?.color || undefined;
 
     const h1Font = ts?.heading1?.font || formatSpec.font_name || "黑体";
     const h1Size = ts?.heading1?.size || parseInt(formatSpec.font_size_heading) || 36;
@@ -811,6 +830,7 @@ export default function BiddingAssistant() {
     const h1SpaceBefore = ts?.heading1?.spaceBefore || 240;
     const h1SpaceAfter = ts?.heading1?.spaceAfter || 120;
     const h1LineSpacing = ts?.heading1?.lineSpacing || bodyLineSpacing;
+    const h1Color = ts?.heading1?.color || undefined;
 
     const h2Font = ts?.heading2?.font || h1Font;
     const h2Size = ts?.heading2?.size || 28;
@@ -818,6 +838,7 @@ export default function BiddingAssistant() {
     const h2SpaceBefore = ts?.heading2?.spaceBefore || 200;
     const h2SpaceAfter = ts?.heading2?.spaceAfter || 100;
     const h2LineSpacing = ts?.heading2?.lineSpacing || bodyLineSpacing;
+    const h2Color = ts?.heading2?.color || undefined;
 
     const h3Font = ts?.heading3?.font || h2Font;
     const h3Size = ts?.heading3?.size || 26;
@@ -825,6 +846,7 @@ export default function BiddingAssistant() {
     const h3SpaceBefore = ts?.heading3?.spaceBefore || 160;
     const h3SpaceAfter = ts?.heading3?.spaceAfter || 80;
     const h3LineSpacing = ts?.heading3?.lineSpacing || bodyLineSpacing;
+    const h3Color = ts?.heading3?.color || undefined;
 
     const h4Font = ts?.heading4?.font || h3Font;
     const h4Size = ts?.heading4?.size || bodySize;
@@ -832,6 +854,7 @@ export default function BiddingAssistant() {
     const h4SpaceBefore = ts?.heading4?.spaceBefore || 120;
     const h4SpaceAfter = ts?.heading4?.spaceAfter || 60;
     const h4LineSpacing = ts?.heading4?.lineSpacing || bodyLineSpacing;
+    const h4Color = ts?.heading4?.color || undefined;
 
     // Page margins from template
     const margins = ts?.pageMargin || {};
@@ -843,16 +866,16 @@ export default function BiddingAssistant() {
     // Helper to create a heading paragraph with full style
     const makeHeading = (text: string, level: "title" | 0 | 1 | 2 | 3) => {
       const config = level === "title"
-        ? { font: titleFont, size: titleSize, bold: titleBold, before: titleSpaceBefore, after: titleSpaceAfter, line: titleLineSpacing, heading: undefined as any }
+        ? { font: titleFont, size: titleSize, bold: titleBold, color: titleColor, before: titleSpaceBefore, after: titleSpaceAfter, line: titleLineSpacing, heading: undefined as any }
         : level === 0
-        ? { font: h1Font, size: h1Size, bold: h1Bold, before: h1SpaceBefore, after: h1SpaceAfter, line: h1LineSpacing, heading: HeadingLevel.HEADING_1 }
+        ? { font: h1Font, size: h1Size, bold: h1Bold, color: h1Color, before: h1SpaceBefore, after: h1SpaceAfter, line: h1LineSpacing, heading: HeadingLevel.HEADING_1 }
         : level === 1
-        ? { font: h2Font, size: h2Size, bold: h2Bold, before: h2SpaceBefore, after: h2SpaceAfter, line: h2LineSpacing, heading: HeadingLevel.HEADING_2 }
+        ? { font: h2Font, size: h2Size, bold: h2Bold, color: h2Color, before: h2SpaceBefore, after: h2SpaceAfter, line: h2LineSpacing, heading: HeadingLevel.HEADING_2 }
         : level === 2
-        ? { font: h3Font, size: h3Size, bold: h3Bold, before: h3SpaceBefore, after: h3SpaceAfter, line: h3LineSpacing, heading: HeadingLevel.HEADING_3 }
-        : { font: h4Font, size: h4Size, bold: h4Bold, before: h4SpaceBefore, after: h4SpaceAfter, line: h4LineSpacing, heading: HeadingLevel.HEADING_4 };
+        ? { font: h3Font, size: h3Size, bold: h3Bold, color: h3Color, before: h3SpaceBefore, after: h3SpaceAfter, line: h3LineSpacing, heading: HeadingLevel.HEADING_3 }
+        : { font: h4Font, size: h4Size, bold: h4Bold, color: h4Color, before: h4SpaceBefore, after: h4SpaceAfter, line: h4LineSpacing, heading: HeadingLevel.HEADING_4 };
       return new Paragraph({
-        children: [new TextRun({ text, font: config.font, size: config.size, bold: config.bold })],
+        children: [new TextRun({ text, font: config.font, size: config.size, bold: config.bold, color: config.color })],
         heading: config.heading,
         spacing: { before: config.before, after: config.after, line: config.line },
         alignment: level === "title" ? AlignmentType.CENTER : undefined,
@@ -860,7 +883,7 @@ export default function BiddingAssistant() {
     };
 
     const makeBody = (text: string) => new Paragraph({
-      children: [new TextRun({ text, font: bodyFont, size: bodySize })],
+      children: [new TextRun({ text, font: bodyFont, size: bodySize, color: bodyColor })],
       spacing: { before: bodySpaceBefore, after: bodySpaceAfter, line: bodyLineSpacing },
     });
 
@@ -1756,6 +1779,7 @@ export default function BiddingAssistant() {
                           {(s as HeadingStyle).spaceBefore ? ` 段前${(s as HeadingStyle).spaceBefore! / 20}pt` : ""}
                           {(s as HeadingStyle).spaceAfter ? ` 段后${(s as HeadingStyle).spaceAfter! / 20}pt` : ""}
                           {(s as any).lineSpacing ? ` 行距${((s as any).lineSpacing / 240).toFixed(1)}倍` : ""}
+                          {s.color ? ` 颜色#${s.color}` : ""}
                         </span>
                       </div>
                     ))}
