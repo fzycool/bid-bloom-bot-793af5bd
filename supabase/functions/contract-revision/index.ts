@@ -1,11 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { encode as encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
+import { decode as decodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
+
+const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -15,18 +17,23 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseKey);
+  const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
 
   let revisionId: string | undefined;
 
   try {
     const body = await req.json();
     revisionId = body.revisionId;
-    if (!revisionId) {
-      return new Response(JSON.stringify({ error: "Missing revisionId" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const pageImagePaths: string[] = body.pageImagePaths || [];
+
+    if (!revisionId || pageImagePaths.length === 0) {
+      return new Response(
+        JSON.stringify({ error: "Missing revisionId or pageImagePaths" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
+
+    if (!lovableApiKey) throw new Error("LOVABLE_API_KEY not configured");
 
     const { data: revision, error: revError } = await supabase
       .from("contract_revisions")
@@ -41,99 +48,101 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Update status to processing
     await supabase
       .from("contract_revisions")
       .update({ ai_status: "processing" })
       .eq("id", revisionId);
 
-    // Generate a signed URL instead of downloading the file
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+    // Step 1: Create signed URL for original PDF to analyze
+    const { data: pdfUrlData } = await supabase.storage
       .from("contract-files")
-      .createSignedUrl(revision.original_file_path, 600); // 10 min expiry
+      .createSignedUrl(revision.original_file_path, 600);
 
-    if (signedUrlError || !signedUrlData?.signedUrl) {
-      throw new Error("Failed to create signed URL for file");
-    }
+    if (!pdfUrlData?.signedUrl) throw new Error("Failed to create PDF signed URL");
 
-    // Get active model config
-    const { data: modelConfig } = await supabase
-      .from("model_config")
-      .select("*")
-      .eq("is_active", true)
-      .maybeSingle();
-
-    let aiResponse: string;
-
-    // Always use Lovable AI for file-based processing since custom models
-    // (like DeepSeek) typically can't access file URLs directly.
-    // Custom models are used only if no Lovable API key is available.
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (lovableApiKey) {
-      aiResponse = await callLovableAI(
-        signedUrlData.signedUrl,
-        revision.revision_instructions
-      );
-    } else if (modelConfig?.api_key && modelConfig?.base_url) {
-      aiResponse = await callCustomModel(
-        modelConfig,
-        revision.revision_instructions
-      );
-    } else {
-      throw new Error("No AI provider configured");
-    }
-
-    if (!aiResponse || aiResponse.trim() === "") {
-      throw new Error("AI returned empty response");
-    }
-
-
-    const modifiedText = aiResponse;
-
-    // Generate a simple text-based PDF
-    const pdfBytes = generateSimplePDF(modifiedText);
-
-    const revisedPath = revision.original_file_path.replace(
-      /\.pdf$/i,
-      `_revised_${Date.now()}.pdf`
+    // Step 2: Analyze which pages need editing
+    const edits = await analyzeEdits(
+      lovableApiKey,
+      pdfUrlData.signedUrl,
+      revision.revision_instructions,
+      pageImagePaths.length
     );
-    const { error: uploadError } = await supabase.storage
-      .from("contract-files")
-      .upload(revisedPath, pdfBytes, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
 
-    if (uploadError) {
-      throw new Error("Upload revised file failed: " + uploadError.message);
+    console.log("Identified edits:", JSON.stringify(edits));
+
+    // Step 3: Edit identified pages
+    const finalPagePaths = [...pageImagePaths]; // start with originals
+    const editedPageNumbers: number[] = [];
+
+    for (const edit of edits) {
+      const pageIdx = edit.page_number - 1; // 0-indexed
+      if (pageIdx < 0 || pageIdx >= pageImagePaths.length) continue;
+
+      // Create signed URL for this page image
+      const { data: pageUrlData } = await supabase.storage
+        .from("contract-files")
+        .createSignedUrl(pageImagePaths[pageIdx], 600);
+
+      if (!pageUrlData?.signedUrl) continue;
+
+      try {
+        const editedImageBase64 = await editPageImage(
+          lovableApiKey,
+          pageUrlData.signedUrl,
+          edit.edit_instruction
+        );
+
+        if (editedImageBase64) {
+          // Upload edited image
+          const rawBase64 = editedImageBase64.replace(/^data:image\/\w+;base64,/, "");
+          const imageBytes = decodeBase64(rawBase64);
+          const editedPath = pageImagePaths[pageIdx].replace(/\.png$/i, `_edited.png`);
+
+          const { error: uploadErr } = await supabase.storage
+            .from("contract-files")
+            .upload(editedPath, imageBytes, {
+              contentType: "image/png",
+              upsert: true,
+            });
+
+          if (!uploadErr) {
+            finalPagePaths[pageIdx] = editedPath;
+            editedPageNumbers.push(edit.page_number);
+          }
+        }
+      } catch (editErr) {
+        console.error(`Failed to edit page ${edit.page_number}:`, editErr);
+        // Continue with other pages
+      }
     }
 
+    // Update revision record
     await supabase
       .from("contract_revisions")
       .update({
         ai_status: "completed",
-        revised_file_path: revisedPath,
+        revised_file_path: "image-based", // marker for image-based result
         ai_result: {
-          modified_content: modifiedText.substring(0, 2000),
-          full_length: modifiedText.length,
+          final_page_paths: finalPagePaths,
+          edited_page_numbers: editedPageNumbers,
+          total_pages: pageImagePaths.length,
         },
       })
       .eq("id", revisionId);
 
     return new Response(
-      JSON.stringify({ success: true, revisedPath }),
+      JSON.stringify({ success: true, editedPages: editedPageNumbers }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("Contract revision error:", err);
-    // Update status to error if we have the revisionId
     if (revisionId) {
       try {
         await supabase
           .from("contract_revisions")
           .update({ ai_status: "error", ai_result: { error: err.message || "Unknown error" } })
           .eq("id", revisionId);
-      } catch (_) { /* ignore cleanup error */ }
+      } catch (_) {}
     }
     return new Response(
       JSON.stringify({ error: err.message }),
@@ -142,204 +151,137 @@ Deno.serve(async (req) => {
   }
 });
 
-async function callLovableAI(
-  fileUrl: string,
-  instructions: string
-): Promise<string> {
-  const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
-  if (!lovableApiKey) throw new Error("LOVABLE_API_KEY not configured");
-
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+async function analyzeEdits(
+  apiKey: string,
+  pdfUrl: string,
+  instructions: string,
+  totalPages: number
+): Promise<Array<{ page_number: number; edit_instruction: string }>> {
+  const response = await fetch(GATEWAY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${lovableApiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
         {
           role: "system",
-          content: `你是一个专业的合同修订助手。用户会提供一份PDF合同和修改指令。
-你需要：
-1. 仔细阅读整份合同
-2. 根据用户的修改指令，精确定位需要修改的条款
-3. 输出修改后的完整合同文本，保持原有的格式结构（章节编号、条款编号等）
-4. 只修改用户要求的部分，其他内容保持原样
-5. 在修改的条款前后用【修改开始】和【修改结束】标注
-
-直接输出修改后的完整合同文本，不要加任何额外说明。`,
+          content: `你是一个文档分析助手。用户会提供一份PDF合同和修改指令。你需要分析修改指令，确定需要修改的具体页码（1-${totalPages}）和每页的具体修改内容。`,
         },
         {
           role: "user",
           content: [
             {
               type: "file",
-              file: {
-                filename: "contract.pdf",
-                file_data: fileUrl,
-              },
+              file: { filename: "contract.pdf", file_data: pdfUrl },
             },
             {
               type: "text",
-              text: `请按照以下修改指令修改合同：\n\n${instructions}`,
+              text: `请分析以下修改指令，确定需要在哪些页面进行修改：\n\n${instructions}`,
             },
           ],
         },
       ],
-      max_tokens: 16000,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "identify_edits",
+            description: "识别需要修改的页面和具体修改内容",
+            parameters: {
+              type: "object",
+              properties: {
+                edits: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      page_number: {
+                        type: "integer",
+                        description: "需要修改的页码（从1开始）",
+                      },
+                      edit_instruction: {
+                        type: "string",
+                        description: "该页面的具体修改内容，例如：将第三行的'5%'改为'3%'",
+                      },
+                    },
+                    required: ["page_number", "edit_instruction"],
+                  },
+                },
+              },
+              required: ["edits"],
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "identify_edits" } },
     }),
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`AI API error: ${response.status} - ${errText}`);
+    throw new Error(`Analysis API error: ${response.status} - ${errText}`);
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
-}
-
-async function callCustomModel(
-  config: any,
-  instructions: string
-): Promise<string> {
-  let url = config.base_url.replace(/\/+$/, "");
-  // If base_url doesn't already end with /chat/completions, append it
-  if (!url.endsWith("/chat/completions")) {
-    url = `${url}/chat/completions`;
+  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (!toolCall) {
+    throw new Error("AI did not return edit analysis");
   }
 
-  const response = await fetch(url, {
+  const args = JSON.parse(toolCall.function.arguments);
+  return args.edits || [];
+}
+
+async function editPageImage(
+  apiKey: string,
+  imageUrl: string,
+  editInstruction: string
+): Promise<string | null> {
+  const response = await fetch(GATEWAY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.api_key}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: config.model_name,
+      model: "google/gemini-2.5-flash-image",
       messages: [
         {
-          role: "system",
-          content: `你是一个专业的合同修订助手。用户会提供一份合同的URL和修改指令。
-你需要：
-1. 仔细阅读整份合同
-2. 根据用户的修改指令，精确定位需要修改的条款
-3. 输出修改后的完整合同文本，保持原有的格式结构
-4. 只修改用户要求的部分，其他内容保持原样
-5. 在修改的条款前后用【修改开始】和【修改结束】标注
-
-直接输出修改后的完整合同文本，不要加任何额外说明。`,
-        },
-        {
           role: "user",
-          content: `请按照以下修改指令修改合同：\n\n${instructions}\n\n合同文件URL: ${fileUrl}`,
+          content: [
+            {
+              type: "text",
+              text: `你是一个专业的文档图像编辑器。请对这个文档页面图片进行精确修改：
+
+${editInstruction}
+
+要求：
+1. 保持文档页面的原始排版、格式、字体、字号、颜色完全不变
+2. 只修改指定的文字内容
+3. 修改后的文字必须与周围文字的风格完全一致，看起来像原始文档一样自然
+4. 不要改变文档中的任何其他内容、印章、签名、表格线等
+5. 输出的图片分辨率和尺寸必须与输入一致`,
+            },
+            {
+              type: "image_url",
+              image_url: { url: imageUrl },
+            },
+          ],
         },
       ],
-      max_tokens: config.max_tokens || 8000,
+      modalities: ["image", "text"],
     }),
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Custom AI error: ${response.status} - ${errText}`);
+    throw new Error(`Image edit API error: ${response.status} - ${errText}`);
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
-}
-
-// Minimal PDF generator - ASCII only, keeps memory low
-function generateSimplePDF(text: string): Uint8Array {
-  const lines = text.split("\n");
-  const pageHeight = 842;
-  const pageWidth = 595;
-  const margin = 72;
-  const lineHeight = 14;
-  const maxCharsPerLine = 80;
-  const usableHeight = pageHeight - 2 * margin;
-  const linesPerPage = Math.floor(usableHeight / lineHeight);
-
-  // Wrap lines
-  const wrappedLines: string[] = [];
-  for (const line of lines) {
-    if (line.length <= maxCharsPerLine) {
-      wrappedLines.push(line);
-    } else {
-      for (let i = 0; i < line.length; i += maxCharsPerLine) {
-        wrappedLines.push(line.substring(i, i + maxCharsPerLine));
-      }
-    }
-  }
-
-  // Split into pages
-  const pages: string[][] = [];
-  for (let i = 0; i < wrappedLines.length; i += linesPerPage) {
-    pages.push(wrappedLines.slice(i, i + linesPerPage));
-  }
-  if (pages.length === 0) pages.push([""]);
-
-  const objects: string[] = [];
-  let objectCount = 0;
-
-  const addObject = (content: string): number => {
-    objectCount++;
-    objects.push(`${objectCount} 0 obj\n${content}\nendobj`);
-    return objectCount;
-  };
-
-  addObject("<< /Type /Catalog /Pages 2 0 R >>");
-  const pagesObjIdx = objects.length;
-  addObject("");
-
-  const fontObjNum = addObject(
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
-  );
-
-  const pageObjNums: number[] = [];
-
-  for (const pageLines of pages) {
-    let stream = `BT\n/F1 10 Tf\n${margin} ${pageHeight - margin} Td\n${lineHeight} TL\n`;
-    for (const line of pageLines) {
-      const escaped = line
-        .replace(/\\/g, "\\\\")
-        .replace(/\(/g, "\\(")
-        .replace(/\)/g, "\\)");
-      stream += `(${escaped}) Tj T*\n`;
-    }
-    stream += "ET";
-
-    const streamBytes = new TextEncoder().encode(stream);
-    const contentObj = addObject(
-      `<< /Length ${streamBytes.length} >>\nstream\n${stream}\nendstream`
-    );
-
-    const pageObj = addObject(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentObj} 0 R /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> >>`
-    );
-    pageObjNums.push(pageObj);
-  }
-
-  const kidsStr = pageObjNums.map((n) => `${n} 0 R`).join(" ");
-  objects[pagesObjIdx] = `2 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${pages.length} >>\nendobj`;
-
-  let pdf = "%PDF-1.4\n";
-  const offsets: number[] = [];
-
-  for (const obj of objects) {
-    offsets.push(pdf.length);
-    pdf += obj + "\n";
-  }
-
-  const xrefOffset = pdf.length;
-  pdf += `xref\n0 ${objectCount + 1}\n`;
-  pdf += "0000000000 65535 f \n";
-  for (const offset of offsets) {
-    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
-  }
-
-  pdf += `trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\n`;
-  pdf += `startxref\n${xrefOffset}\n%%EOF`;
-
-  return new TextEncoder().encode(pdf);
+  const editedImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  return editedImageUrl || null;
 }
