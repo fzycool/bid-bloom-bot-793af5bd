@@ -54,14 +54,13 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
     const doc = parser.parseFromString(xml, "application/xml");
     const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
-    // Helper to extract color from rPr element
-    const extractColor = (rPr: Element): string | undefined => {
+    // Helper to extract color from rPr element (returns "000000" as default black)
+    const extractColor = (rPr: Element): string => {
       const color = rPr.getElementsByTagNameNS(ns, "color")[0];
       if (color) {
-        // Try explicit hex value first
         const val = color.getAttributeNS(ns, "val") || color.getAttribute("w:val") || color.getAttribute("val");
         if (val && val !== "auto" && val !== "windowText") return val;
-        // Try themeColor mapping for common Word theme colors
+        // Try themeColor mapping
         const themeColor = color.getAttributeNS(ns, "themeColor") || color.getAttribute("w:themeColor") || color.getAttribute("themeColor");
         const themeMap: Record<string, string> = {
           dark1: "000000", dark2: "44546A", light1: "FFFFFF", light2: "E7E6E6",
@@ -69,24 +68,9 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
           accent5: "5B9BD5", accent6: "70AD47", hyperlink: "0563C1", followedHyperlink: "954F72",
           text1: "000000", text2: "44546A", background1: "FFFFFF", background2: "E7E6E6",
         };
-        if (themeColor && themeMap[themeColor]) {
-          // Check if there's a themeTint/themeShade modifying the base color
-          return themeMap[themeColor];
-        }
+        if (themeColor && themeMap[themeColor]) return themeMap[themeColor];
       }
-      // Also check highlight color
-      const highlight = rPr.getElementsByTagNameNS(ns, "highlight")[0];
-      if (highlight) {
-        const hVal = highlight.getAttributeNS(ns, "val") || highlight.getAttribute("w:val") || highlight.getAttribute("val");
-        const highlightMap: Record<string, string> = {
-          yellow: "FFFF00", green: "00FF00", cyan: "00FFFF", magenta: "FF00FF",
-          blue: "0000FF", red: "FF0000", darkBlue: "000080", darkCyan: "008080",
-          darkGreen: "008000", darkMagenta: "800080", darkRed: "800000", darkYellow: "808000",
-          darkGray: "808080", lightGray: "C0C0C0", black: "000000",
-        };
-        if (hVal && highlightMap[hVal]) return highlightMap[hVal];
-      }
-      return undefined;
+      return "000000"; // default black
     };
 
     // Extract default run properties
@@ -230,6 +214,14 @@ async function parseTemplateStyles(file: File): Promise<TemplateStyles> {
       }
     }
   }
+
+  // Ensure all styles have a color (default to black)
+  if (!styles.body.color) styles.body.color = "000000";
+  if (!styles.title.color) styles.title.color = "000000";
+  if (!styles.heading1.color) styles.heading1.color = "000000";
+  if (!styles.heading2.color) styles.heading2.color = "000000";
+  if (!styles.heading3.color) styles.heading3.color = "000000";
+  if (!styles.heading4.color) styles.heading4.color = "000000";
 
   return styles;
 }
