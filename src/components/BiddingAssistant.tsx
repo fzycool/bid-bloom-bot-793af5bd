@@ -793,19 +793,46 @@ export default function BiddingAssistant() {
 
     // Priority: template styles > AI-detected > defaults
     const bodyFont = ts?.body?.font || formatSpec.font_name || "仿宋";
-    const headingFont = ts?.heading1?.font || ts?.heading2?.font || formatSpec.font_name || "黑体";
     const bodySize = ts?.body?.size || parseInt(formatSpec.font_size_body) || 24;
+    const bodyLineSpacing = ts?.body?.lineSpacing || Math.round((parseFloat(formatSpec.line_spacing) || 1.5) * 240);
+    const bodySpaceBefore = ts?.body?.spaceBefore || 0;
+    const bodySpaceAfter = ts?.body?.spaceAfter || 0;
+
+    const titleFont = ts?.title?.font || formatSpec.font_name || "黑体";
     const titleSize = ts?.title?.size || parseInt(formatSpec.font_size_heading) || 44;
+    const titleBold = ts?.title?.bold !== false;
+    const titleSpaceBefore = ts?.title?.spaceBefore || 0;
+    const titleSpaceAfter = ts?.title?.spaceAfter || 120;
+    const titleLineSpacing = ts?.title?.lineSpacing || bodyLineSpacing;
+
+    const h1Font = ts?.heading1?.font || formatSpec.font_name || "黑体";
     const h1Size = ts?.heading1?.size || parseInt(formatSpec.font_size_heading) || 36;
+    const h1Bold = ts?.heading1?.bold !== false;
+    const h1SpaceBefore = ts?.heading1?.spaceBefore || 240;
+    const h1SpaceAfter = ts?.heading1?.spaceAfter || 120;
+    const h1LineSpacing = ts?.heading1?.lineSpacing || bodyLineSpacing;
+
+    const h2Font = ts?.heading2?.font || h1Font;
     const h2Size = ts?.heading2?.size || 28;
+    const h2Bold = ts?.heading2?.bold !== false;
+    const h2SpaceBefore = ts?.heading2?.spaceBefore || 200;
+    const h2SpaceAfter = ts?.heading2?.spaceAfter || 100;
+    const h2LineSpacing = ts?.heading2?.lineSpacing || bodyLineSpacing;
+
+    const h3Font = ts?.heading3?.font || h2Font;
     const h3Size = ts?.heading3?.size || 26;
+    const h3Bold = ts?.heading3?.bold !== false;
+    const h3SpaceBefore = ts?.heading3?.spaceBefore || 160;
+    const h3SpaceAfter = ts?.heading3?.spaceAfter || 80;
+    const h3LineSpacing = ts?.heading3?.lineSpacing || bodyLineSpacing;
+
+    const h4Font = ts?.heading4?.font || h3Font;
     const h4Size = ts?.heading4?.size || bodySize;
-    const h1Font = ts?.heading1?.font || headingFont;
-    const h2Font = ts?.heading2?.font || headingFont;
-    const h3Font = ts?.heading3?.font || headingFont;
-    const titleFont = ts?.title?.font || headingFont;
-    // Line spacing: template value (in twips) > AI value (multiplier) > default 1.5x
-    const lineSpacing = ts?.body?.lineSpacing || Math.round((parseFloat(formatSpec.line_spacing) || 1.5) * 240);
+    const h4Bold = ts?.heading4?.bold !== false;
+    const h4SpaceBefore = ts?.heading4?.spaceBefore || 120;
+    const h4SpaceAfter = ts?.heading4?.spaceAfter || 60;
+    const h4LineSpacing = ts?.heading4?.lineSpacing || bodyLineSpacing;
+
     // Page margins from template
     const margins = ts?.pageMargin || {};
     const pgTop = margins.top || 1440;
@@ -813,69 +840,67 @@ export default function BiddingAssistant() {
     const pgLeft = margins.left || 1440;
     const pgRight = margins.right || 1440;
 
+    // Helper to create a heading paragraph with full style
+    const makeHeading = (text: string, level: "title" | 0 | 1 | 2 | 3) => {
+      const config = level === "title"
+        ? { font: titleFont, size: titleSize, bold: titleBold, before: titleSpaceBefore, after: titleSpaceAfter, line: titleLineSpacing, heading: undefined as any }
+        : level === 0
+        ? { font: h1Font, size: h1Size, bold: h1Bold, before: h1SpaceBefore, after: h1SpaceAfter, line: h1LineSpacing, heading: HeadingLevel.HEADING_1 }
+        : level === 1
+        ? { font: h2Font, size: h2Size, bold: h2Bold, before: h2SpaceBefore, after: h2SpaceAfter, line: h2LineSpacing, heading: HeadingLevel.HEADING_2 }
+        : level === 2
+        ? { font: h3Font, size: h3Size, bold: h3Bold, before: h3SpaceBefore, after: h3SpaceAfter, line: h3LineSpacing, heading: HeadingLevel.HEADING_3 }
+        : { font: h4Font, size: h4Size, bold: h4Bold, before: h4SpaceBefore, after: h4SpaceAfter, line: h4LineSpacing, heading: HeadingLevel.HEADING_4 };
+      return new Paragraph({
+        children: [new TextRun({ text, font: config.font, size: config.size, bold: config.bold })],
+        heading: config.heading,
+        spacing: { before: config.before, after: config.after, line: config.line },
+        alignment: level === "title" ? AlignmentType.CENTER : undefined,
+      });
+    };
+
+    const makeBody = (text: string) => new Paragraph({
+      children: [new TextRun({ text, font: bodyFont, size: bodySize })],
+      spacing: { before: bodySpaceBefore, after: bodySpaceAfter, line: bodyLineSpacing },
+    });
+
     const children: Paragraph[] = [
-      new Paragraph({
-        children: [new TextRun({ text: projectTitle, font: titleFont, size: titleSize, bold: true })],
-        alignment: AlignmentType.CENTER,
-        spacing: { line: lineSpacing },
-      }),
+      makeHeading(projectTitle, "title"),
       new Paragraph({ text: "" }),
     ];
 
     if (parsedOutline?.overall_strategy) {
       children.push(
-        new Paragraph({
-          children: [new TextRun({ text: "投标策略建议", font: h1Font, size: h1Size, bold: true })],
-          spacing: { line: lineSpacing },
-        }),
-        new Paragraph({
-          children: [new TextRun({ text: parsedOutline.overall_strategy, font: bodyFont, size: bodySize })],
-          spacing: { line: lineSpacing },
-        }),
+        makeHeading("投标策略建议", 0),
+        makeBody(parsedOutline.overall_strategy),
         new Paragraph({ text: "" }),
       );
     }
 
-    children.push(new Paragraph({
-      children: [new TextRun({ text: "投标文件提纲", font: h1Font, size: h1Size, bold: true })],
-      spacing: { line: lineSpacing },
-    }));
+    children.push(makeHeading("投标文件提纲", 0));
 
     for (const { section, depth } of flatSections) {
-      const fontSize = depth === 0 ? h2Size : depth === 1 ? h3Size : depth === 2 ? h4Size : bodySize;
-      const sectionFont = depth === 0 ? h2Font : depth === 1 ? h3Font : headingFont;
+      const level = Math.min(depth, 3) as 0 | 1 | 2 | 3;
       const prefix = section.section_number ? `${section.section_number} ` : "";
-      children.push(new Paragraph({
-        children: [new TextRun({ text: `${prefix}${section.title}`, font: sectionFont, size: fontSize, bold: true })],
-        spacing: { line: lineSpacing },
-      }));
+      children.push(makeHeading(`${prefix}${section.title}`, level));
       if (section.content) {
-        children.push(new Paragraph({
-          children: [new TextRun({ text: section.content, font: bodyFont, size: bodySize })],
-          spacing: { line: lineSpacing },
-        }));
+        children.push(makeBody(section.content));
       }
     }
 
     if (parsedOutline?.personnel_plan?.length > 0) {
       children.push(new Paragraph({ text: "" }));
-      children.push(new Paragraph({
-        children: [new TextRun({ text: "人员配置建议", font: h1Font, size: h1Size, bold: true })],
-        spacing: { line: lineSpacing },
-      }));
+      children.push(makeHeading("人员配置建议", 0));
       for (const p of parsedOutline.personnel_plan) {
         children.push(new Paragraph({
           children: [
             new TextRun({ text: `${p.role}`, bold: true, font: bodyFont, size: bodySize }),
             new TextRun({ text: ` — ${p.requirements || ""}`, font: bodyFont, size: bodySize }),
           ],
-          spacing: { line: lineSpacing },
+          spacing: { before: bodySpaceBefore, after: bodySpaceAfter, line: bodyLineSpacing },
         }));
         if (p.suggested_candidate) {
-          children.push(new Paragraph({
-            children: [new TextRun({ text: `  建议人选: ${p.suggested_candidate}`, font: bodyFont, size: bodySize })],
-            spacing: { line: lineSpacing },
-          }));
+          children.push(makeBody(`  建议人选: ${p.suggested_candidate}`));
         }
       }
     }
