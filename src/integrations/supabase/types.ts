@@ -202,6 +202,8 @@ export type Database = {
           id: string
           outline_content: string | null
           project_name: string
+          proposal_doc_progress: string | null
+          proposal_doc_status: string
           status: string
           token_usage: Json | null
           updated_at: string
@@ -216,6 +218,8 @@ export type Database = {
           id?: string
           outline_content?: string | null
           project_name?: string
+          proposal_doc_progress?: string | null
+          proposal_doc_status?: string
           status?: string
           token_usage?: Json | null
           updated_at?: string
@@ -230,6 +234,8 @@ export type Database = {
           id?: string
           outline_content?: string | null
           project_name?: string
+          proposal_doc_progress?: string | null
+          proposal_doc_status?: string
           status?: string
           token_usage?: Json | null
           updated_at?: string

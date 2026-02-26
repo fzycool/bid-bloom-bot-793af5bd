@@ -282,6 +282,9 @@ export default function BiddingAssistant() {
   const [templateUploading, setTemplateUploading] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
   const [templateStyles, setTemplateStyles] = useState<TemplateStyles | null>(null);
+  const [generatingDoc, setGeneratingDoc] = useState(false);
+  const [docStatus, setDocStatus] = useState<string>("pending");
+  const [docProgress, setDocProgress] = useState<string | null>(null);
   const fetchAnalyses = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
@@ -399,8 +402,56 @@ export default function BiddingAssistant() {
     if (selectedProposal) {
       fetchProposalDetails(selectedProposal.id);
       setCustomPrompt(selectedProposal.custom_prompt || "");
+      // Sync doc status from proposal
+      setDocStatus((selectedProposal as any).proposal_doc_status || "pending");
+      setDocProgress((selectedProposal as any).proposal_doc_progress || null);
     }
   }, [selectedProposal?.id, fetchProposalDetails]);
+
+  // Poll for proposal doc generation progress
+  useEffect(() => {
+    if (!selectedProposal || docStatus !== "processing") return;
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from("bid_proposals")
+        .select("proposal_doc_status, proposal_doc_progress")
+        .eq("id", selectedProposal.id)
+        .single();
+      if (data) {
+        const d = data as any;
+        setDocStatus(d.proposal_doc_status || "pending");
+        setDocProgress(d.proposal_doc_progress || null);
+        if (d.proposal_doc_status !== "processing") {
+          clearInterval(interval);
+          if (d.proposal_doc_status === "completed") {
+            fetchProposalDetails(selectedProposal.id);
+            toast({ title: "投标方案生成完成", description: "可以下载查看完整方案" });
+          }
+        }
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selectedProposal?.id, docStatus, fetchProposalDetails, toast]);
+
+  const handleGenerateProposal = async () => {
+    if (!selectedProposal) return;
+    setGeneratingDoc(true);
+    try {
+      setDocStatus("processing");
+      setDocProgress("正在准备数据...");
+      const { error } = await supabase.functions.invoke("generate-proposal", {
+        body: { proposalId: selectedProposal.id },
+      });
+      if (error) throw error;
+      toast({ title: "开始生成投标方案", description: "AI正在逐章节撰写，请稍候..." });
+    } catch (e: any) {
+      toast({ title: "生成失败", description: e.message, variant: "destructive" });
+      setDocStatus("failed");
+      setDocProgress(e.message);
+    } finally {
+      setGeneratingDoc(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!user || !selectedBidId) return;
@@ -1020,6 +1071,12 @@ export default function BiddingAssistant() {
             <Tabs defaultValue="outline" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="outline"><FileText className="w-4 h-4 mr-1" />应答提纲</TabsTrigger>
+                <TabsTrigger value="proposal">
+                  <Sparkles className="w-4 h-4 mr-1" />
+                  投标方案
+                  {docStatus === "completed" && <Badge variant="default" className="ml-1.5 text-[10px] px-1.5 py-0">已生成</Badge>}
+                  {docStatus === "processing" && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">生成中</Badge>}
+                </TabsTrigger>
                 <TabsTrigger value="materials">
                   <CheckCircle className="w-4 h-4 mr-1" />
                   证明材料
@@ -1118,6 +1175,112 @@ export default function BiddingAssistant() {
                     </div>
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              {/* Proposal document tab */}
+              <TabsContent value="proposal" className="space-y-4">
+                {docStatus === "pending" && (
+                  <Card className="flex flex-col items-center justify-center py-16">
+                    <Sparkles className="w-10 h-10 text-accent opacity-50 mb-4" />
+                    <p className="text-sm font-medium text-foreground mb-2">尚未生成投标方案</p>
+                    <p className="text-xs text-muted-foreground mb-6 max-w-md text-center">
+                      根据应答提纲、知识库资料和证明材料，AI将为每个章节撰写详细的投标方案正文
+                    </p>
+                    <Button onClick={handleGenerateProposal} disabled={generatingDoc || sections.length === 0}>
+                      {generatingDoc ? (
+                        <><Loader2 className="w-4 h-4 mr-1 animate-spin" />提交中...</>
+                      ) : (
+                        <><Sparkles className="w-4 h-4 mr-1" />生成投标方案</>
+                      )}
+                    </Button>
+                    {sections.length === 0 && (
+                      <p className="text-xs text-muted-foreground mt-3">请先生成应答提纲</p>
+                    )}
+                  </Card>
+                )}
+
+                {docStatus === "processing" && (
+                  <Card className="flex items-center justify-center py-20">
+                    <div className="text-center space-y-4 max-w-md">
+                      <Loader2 className="w-8 h-8 mx-auto animate-spin text-accent" />
+                      <p className="text-sm font-medium text-foreground">
+                        {docProgress || "正在生成投标方案..."}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        AI正在逐章节撰写详细内容，请耐心等待
+                      </p>
+                    </div>
+                  </Card>
+                )}
+
+                {docStatus === "failed" && (
+                  <Card className="flex items-center justify-center py-16">
+                    <div className="text-center space-y-4">
+                      <XCircle className="w-10 h-10 mx-auto text-destructive opacity-60" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">方案生成失败</p>
+                        <p className="text-xs text-muted-foreground mt-1">{docProgress || "未知错误"}</p>
+                      </div>
+                      <Button onClick={handleGenerateProposal} disabled={generatingDoc}>
+                        {generatingDoc ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />重试中...</> : <><RefreshCw className="w-4 h-4 mr-1" />重新生成</>}
+                      </Button>
+                    </div>
+                  </Card>
+                )}
+
+                {docStatus === "completed" && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">方案已生成完毕，可下载Word文档</p>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={handleGenerateProposal} disabled={generatingDoc}>
+                          <RefreshCw className="w-4 h-4 mr-1" />重新生成
+                        </Button>
+                        <Button size="sm" onClick={handleExportWord}>
+                          <Download className="w-4 h-4 mr-1" />下载投标方案
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">方案内容预览</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ScrollArea className="max-h-[600px]">
+                          <div className="space-y-4">
+                            {sections.map((section) => (
+                              <div key={section.id}>
+                                <h3 className="text-sm font-semibold text-foreground mb-1">
+                                  {section.section_number && <span className="text-muted-foreground mr-1">{section.section_number}</span>}
+                                  {section.title}
+                                </h3>
+                                {section.content && (
+                                  <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                                    {section.content.length > 500 ? section.content.slice(0, 500) + "..." : section.content}
+                                  </p>
+                                )}
+                                {section.children?.map((child) => (
+                                  <div key={child.id} className="ml-4 mt-2">
+                                    <h4 className="text-xs font-medium text-foreground mb-0.5">
+                                      {child.section_number && <span className="text-muted-foreground mr-1">{child.section_number}</span>}
+                                      {child.title}
+                                    </h4>
+                                    {child.content && (
+                                      <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                                        {child.content.length > 300 ? child.content.slice(0, 300) + "..." : child.content}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
               </TabsContent>
 
               {/* Materials tab */}
