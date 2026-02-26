@@ -24,7 +24,7 @@ serve(async (req) => {
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
 
-    const { proposalId, filePath, fileType, auditType = "full", useGeneratedContent } = await req.json();
+    const { proposalId, filePath, fileType, auditType = "full", useGeneratedContent, customPrompt } = await req.json();
     if (!proposalId) throw new Error("proposalId is required");
 
     // Fetch proposal + bid analysis
@@ -69,15 +69,7 @@ serve(async (req) => {
       .single();
     if (insertErr || !report) throw insertErr || new Error("创建审查报告失败");
 
-    const systemPrompt = `你是资深投标评审专家，以甲方评委的严苛视角对投标文件进行全面审查。
-
-你将收到：
-1. 终版投标文件（完整标书内容）
-2. 招标文件的解析数据（评分标准、废标条件等）
-3. 投标提纲和证明材料清单
-4. 人员和简历信息
-
-请按以下维度进行逐项检查：
+    const defaultCheckDimensions = `请按以下维度进行逐项检查：
 
 ## 1. 响应性检查
 逐条对照招标文件的评分标准和废标条件，检查终版标书中是否有实质性应答。
@@ -94,7 +86,19 @@ serve(async (req) => {
 - 检查各章节之间的过渡是否自然
 - 检测是否存在"硬拼接"（前后章节主题突然跳变、行业术语不一致）
 - 检查是否存在上下文语义漂移（如前文讲智慧校园后文却提智慧医疗）
-- 检查是否有明显的复制粘贴痕迹（如项目名称不一致）
+- 检查是否有明显的复制粘贴痕迹（如项目名称不一致）`;
+
+    const checkDimensions = customPrompt || defaultCheckDimensions;
+
+    const systemPrompt = `你是资深投标评审专家，以甲方评委的严苛视角对投标文件进行全面审查。
+
+你将收到：
+1. 终版投标文件（完整标书内容）
+2. 招标文件的解析数据（评分标准、废标条件等）
+3. 投标提纲和证明材料清单
+4. 人员和简历信息
+
+${checkDimensions}
 
 请严格输出纯JSON：
 {

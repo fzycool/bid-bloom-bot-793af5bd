@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
@@ -82,6 +83,28 @@ export default function HolographicAudit() {
   const [bidPreview, setBidPreview] = useState<BidAnalysisPreview | null>(null);
   const [showBidPreview, setShowBidPreview] = useState(true);
   const [sectionCount, setSectionCount] = useState(0);
+  const [showPrompt, setShowPrompt] = useState(false);
+
+  const defaultPrompt = `请按以下维度进行逐项检查：
+
+## 1. 响应性检查
+逐条对照招标文件的评分标准和废标条件，检查终版标书中是否有实质性应答。
+- 不仅检查星号项，还要检查每一个评分细则
+- 标注漏项风险和应答不充分的章节
+
+## 2. 逻辑一致性校验
+- 人员逻辑：方案中提到的人数与实际人员清单/简历数量是否一致
+- 证书逻辑：简历中声称的证书与实际附件证明材料是否匹配
+- 报价逻辑：如有报价信息，检查分项累加是否一致
+- 数据一致性：各章节引用的数据、数字是否前后一致
+
+## 3. 语义连贯性审查
+- 检查各章节之间的过渡是否自然
+- 检测是否存在"硬拼接"（前后章节主题突然跳变、行业术语不一致）
+- 检查是否存在上下文语义漂移（如前文讲智慧校园后文却提智慧医疗）
+- 检查是否有明显的复制粘贴痕迹（如项目名称不一致）`;
+
+  const [customPrompt, setCustomPrompt] = useState(defaultPrompt);
 
   const fetchProposals = useCallback(async () => {
     if (!user) return;
@@ -196,6 +219,7 @@ export default function HolographicAudit() {
         body: {
           proposalId: selectedProposalId,
           ...(storagePath ? { filePath: storagePath, fileType } : { useGeneratedContent: true }),
+          customPrompt: customPrompt !== defaultPrompt ? customPrompt : undefined,
         },
       });
       if (error) throw error;
@@ -517,6 +541,42 @@ export default function HolographicAudit() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Custom prompt */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs text-muted-foreground">③ 审查提示词</p>
+                  <div className="flex items-center gap-2">
+                    {customPrompt !== defaultPrompt && (
+                      <button
+                        onClick={() => setCustomPrompt(defaultPrompt)}
+                        className="text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        恢复默认
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowPrompt(!showPrompt)}
+                      className="text-[11px] text-accent hover:underline flex items-center gap-0.5"
+                    >
+                      {showPrompt ? "收起" : "查看/编辑"}
+                      {showPrompt ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+                {showPrompt && (
+                  <Textarea
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    rows={12}
+                    className="text-xs font-mono leading-relaxed"
+                    placeholder="输入自定义审查提示词..."
+                  />
+                )}
+                {!showPrompt && customPrompt !== defaultPrompt && (
+                  <p className="text-[11px] text-accent">已自定义提示词</p>
+                )}
               </div>
             </div>
           )}
