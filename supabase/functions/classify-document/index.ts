@@ -116,14 +116,16 @@ amount_range 示例：100万以下、100-500万、500-1000万、1000万-5000万�
     if (toolCall?.function?.arguments) {
       const result = JSON.parse(toolCall.function.arguments);
       
+      const clean = (v: any) => (v == null || v === "null" || v === "") ? null : v;
+
       await supabase.from("documents").update({
-        doc_category: result.doc_category || "其他",
-        industry: result.industry || null,
-        owner_name: result.owner_name || null,
+        doc_category: clean(result.doc_category) || "其他",
+        industry: clean(result.industry),
+        owner_name: clean(result.owner_name),
         doc_year: result.doc_year || null,
-        amount_range: result.amount_range || null,
-        tags: Array.isArray(result.tags) ? result.tags.filter(Boolean) : [],
-        ai_summary: result.summary || "",
+        amount_range: clean(result.amount_range),
+        tags: Array.isArray(result.tags) ? result.tags.filter((t: any) => t != null && t !== "null" && t !== "") : [],
+        ai_summary: clean(result.summary) || "",
         ai_status: "completed",
         ai_metadata: result,
       }).eq("id", documentId);

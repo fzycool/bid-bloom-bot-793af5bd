@@ -375,22 +375,22 @@ export default function KnowledgeBase() {
                                 <p className="text-xs text-muted-foreground line-clamp-2">{doc.ai_summary}</p>
                               )}
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                {doc.doc_category && (
+                                {doc.doc_category && doc.doc_category !== "null" && (
                                   <Badge variant="secondary" className="text-xs">{doc.doc_category}</Badge>
                                 )}
-                                {doc.industry && (
+                                {doc.industry && doc.industry !== "null" && (
                                   <Badge variant="outline" className="text-xs">{doc.industry}</Badge>
                                 )}
-                                {doc.owner_name && (
+                                {doc.owner_name && doc.owner_name !== "null" && (
                                   <Badge variant="outline" className="text-xs">{doc.owner_name}</Badge>
                                 )}
                                 {doc.doc_year && (
                                   <Badge variant="outline" className="text-xs">{doc.doc_year}年</Badge>
                                 )}
-                                {doc.amount_range && (
+                                {doc.amount_range && doc.amount_range !== "null" && (
                                   <Badge variant="outline" className="text-xs">{doc.amount_range}</Badge>
                                 )}
-                                {(doc.tags || []).filter(tag => tag != null && tag !== "").map((tag) => (
+                                {(doc.tags || []).filter(tag => tag != null && tag !== "" && tag !== "null").map((tag) => (
                                   <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
                                 ))}
                               </div>
