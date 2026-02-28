@@ -146,12 +146,90 @@ serve(async (req) => {
 
     // ---- ACTION: chat ----
     if (action === "chat") {
-      const { proposalId, message, context } = params;
+      const { proposalId, message, context, outlineSummary } = params;
 
       const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
       const chatUrl = modelConfig?.base_url || aiUrl;
       const chatModel = modelConfig?.model_name || aiModel;
       const chatKey = modelConfig?.api_key || aiKey;
+
+      const outlineTools = [
+        {
+          type: "function",
+          function: {
+            name: "add_section",
+            description: "添加一个新的提纲章节。可以添加根级章节或子章节。",
+            parameters: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "章节标题" },
+                parent_id: { type: "string", description: "父章节ID，如果是根级章节则为null" },
+              },
+              required: ["title"],
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "rename_section",
+            description: "重命名一个已有的提纲章节",
+            parameters: {
+              type: "object",
+              properties: {
+                section_id: { type: "string", description: "要重命名的章节ID" },
+                new_title: { type: "string", description: "新的章节标题" },
+              },
+              required: ["section_id", "new_title"],
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "delete_section",
+            description: "删除一个提纲章节及其所有子章节",
+            parameters: {
+              type: "object",
+              properties: {
+                section_id: { type: "string", description: "要删除的章节ID" },
+              },
+              required: ["section_id"],
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "move_section",
+            description: "将一个章节在同级中上移或下移",
+            parameters: {
+              type: "object",
+              properties: {
+                section_id: { type: "string", description: "要移动的章节ID" },
+                direction: { type: "string", enum: ["up", "down"], description: "移动方向" },
+              },
+              required: ["section_id", "direction"],
+              additionalProperties: false,
+            },
+          },
+        },
+      ];
+
+      const systemPrompt = `你是资深投标专家助手。你可以回答用户关于标书内容的问题，也可以帮用户编辑提纲目录结构。
+
+当用户要求对提纲进行增加、删除、重命名、移动等操作时，请调用对应的工具函数来执行。你可以一次调用多个工具。
+
+当前提纲结构：
+${outlineSummary || "（暂无提纲）"}
+
+注意：
+- 添加章节时，如果用户要求添加到某个章节下面，请使用对应的parent_id
+- 删除章节会同时删除所有子章节
+- 移动只能在同级章节间进行`;
 
       const response = await fetch(chatUrl, {
         method: "POST",
@@ -159,16 +237,92 @@ serve(async (req) => {
         body: JSON.stringify({
           model: chatModel,
           messages: [
-            { role: "system", content: "你是资深投标专家助手。请根据上下文回答用户关于标书内容的问题，提供专业建议。" },
+            { role: "system", content: systemPrompt },
             { role: "user", content: `${context}\n\n用户问题: ${message}` },
           ],
+          tools: outlineTools,
           max_tokens: 4096,
         }),
       });
 
       if (!response.ok) throw new Error(`AI错误: ${response.status}`);
       const data = await response.json();
-      const reply = data.choices?.[0]?.message?.content?.trim() || "抱歉，暂时无法回复";
+      const choice = data.choices?.[0];
+      const toolCalls = choice?.message?.tool_calls;
+
+      // If AI wants to call tools, execute them on the backend
+      if (toolCalls && toolCalls.length > 0) {
+        const results: string[] = [];
+        for (const tc of toolCalls) {
+          const fn = tc.function.name;
+          const args = JSON.parse(tc.function.arguments || "{}");
+          try {
+            if (fn === "add_section") {
+              const parentId = args.parent_id || null;
+              // Get max sort_order among siblings
+              let query = supabase.from("proposal_sections").select("sort_order").eq("proposal_id", proposalId);
+              if (parentId) { query = query.eq("parent_id", parentId); } else { query = query.is("parent_id", null); }
+              const { data: siblings } = await query;
+              const maxOrder = siblings && siblings.length > 0 ? Math.max(...siblings.map((s: any) => s.sort_order)) : -1;
+              const { error } = await supabase.from("proposal_sections").insert({
+                proposal_id: proposalId,
+                title: args.title,
+                parent_id: parentId,
+                sort_order: maxOrder + 1,
+              });
+              if (error) throw error;
+              results.push(`✅ 已添加章节「${args.title}」`);
+            } else if (fn === "rename_section") {
+              const { error } = await supabase.from("proposal_sections").update({ title: args.new_title }).eq("id", args.section_id).eq("proposal_id", proposalId);
+              if (error) throw error;
+              results.push(`✅ 已将章节重命名为「${args.new_title}」`);
+            } else if (fn === "delete_section") {
+              // Collect all descendant IDs
+              const collectIds = async (id: string): Promise<string[]> => {
+                const ids = [id];
+                const { data: children } = await supabase.from("proposal_sections").select("id").eq("parent_id", id);
+                if (children) {
+                  for (const c of children) {
+                    ids.push(...await collectIds(c.id));
+                  }
+                }
+                return ids;
+              };
+              const idsToDelete = await collectIds(args.section_id);
+              const { error } = await supabase.from("proposal_sections").delete().in("id", idsToDelete);
+              if (error) throw error;
+              results.push(`✅ 已删除章节${idsToDelete.length > 1 ? `（含 ${idsToDelete.length - 1} 个子章节）` : ""}`);
+            } else if (fn === "move_section") {
+              const { data: target } = await supabase.from("proposal_sections").select("id, parent_id, sort_order").eq("id", args.section_id).single();
+              if (!target) { results.push("❌ 未找到该章节"); continue; }
+              let sibQuery = supabase.from("proposal_sections").select("id, sort_order").eq("proposal_id", proposalId);
+              if (target.parent_id) { sibQuery = sibQuery.eq("parent_id", target.parent_id); } else { sibQuery = sibQuery.is("parent_id", null); }
+              const { data: siblings } = await sibQuery.order("sort_order");
+              if (!siblings) { results.push("❌ 查询失败"); continue; }
+              const idx = siblings.findIndex((s: any) => s.id === args.section_id);
+              const swapIdx = args.direction === "up" ? idx - 1 : idx + 1;
+              if (swapIdx < 0 || swapIdx >= siblings.length) { results.push(`⚠️ 已在最${args.direction === "up" ? "上" : "下"}方，无法移动`); continue; }
+              const a = siblings[idx], b = siblings[swapIdx];
+              await Promise.all([
+                supabase.from("proposal_sections").update({ sort_order: b.sort_order }).eq("id", a.id),
+                supabase.from("proposal_sections").update({ sort_order: a.sort_order }).eq("id", b.id),
+              ]);
+              results.push(`✅ 已将章节${args.direction === "up" ? "上移" : "下移"}`);
+            }
+          } catch (toolErr: any) {
+            results.push(`❌ ${fn} 失败: ${toolErr.message}`);
+          }
+        }
+
+        const textReply = choice?.message?.content?.trim();
+        const fullReply = (textReply ? textReply + "\n\n" : "") + results.join("\n");
+
+        return new Response(JSON.stringify({ success: true, reply: fullReply, outlineChanged: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const reply = choice?.message?.content?.trim() || "抱歉，暂时无法回复";
 
       return new Response(JSON.stringify({ success: true, reply }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
