@@ -19,7 +19,9 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  CheckSquare,
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Document {
   id: string;
@@ -66,6 +68,8 @@ export default function KnowledgeBase() {
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, fileName: "" });
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("全部");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
     if (!user) return;
@@ -151,7 +155,47 @@ export default function KnowledgeBase() {
       toast({ title: "删除失败", description: error.message, variant: "destructive" });
     } else {
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(doc.id); return next; });
       toast({ title: "已删除" });
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchDeleting(true);
+    const toDelete = documents.filter((d) => selectedIds.has(d.id));
+    const filePaths = toDelete.map((d) => d.file_path);
+
+    await supabase.storage.from("knowledge-base").remove(filePaths);
+
+    const { error } = await supabase
+      .from("documents")
+      .delete()
+      .in("id", Array.from(selectedIds));
+
+    if (error) {
+      toast({ title: "批量删除失败", description: error.message, variant: "destructive" });
+    } else {
+      setDocuments((prev) => prev.filter((d) => !selectedIds.has(d.id)));
+      toast({ title: `已删除 ${selectedIds.size} 个文档` });
+      setSelectedIds(new Set());
+    }
+    setBatchDeleting(false);
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((d) => d.id)));
     }
   };
 
@@ -271,72 +315,103 @@ export default function KnowledgeBase() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {filtered.map((doc) => {
-            const status = statusConfig[doc.ai_status] || statusConfig.pending;
-            const StatusIcon = status.icon;
-            return (
-              <Card key={doc.id} className="hover:shadow-card-hover transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-                        <FileText className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-foreground truncate">{doc.file_name}</p>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <span className="text-xs text-muted-foreground">{formatSize(doc.file_size)}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(doc.created_at).toLocaleDateString("zh-CN")}
-                          </span>
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${status.color}`}>
-                            <StatusIcon className={`w-3 h-3 ${doc.ai_status === "processing" ? "animate-spin" : ""}`} />
-                            {status.label}
-                          </span>
-                        </div>
-                        {doc.ai_status === "completed" && (
-                          <div className="mt-2 space-y-1">
-                            {doc.ai_summary && (
-                              <p className="text-xs text-muted-foreground line-clamp-2">{doc.ai_summary}</p>
-                            )}
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {doc.doc_category && (
-                                <Badge variant="secondary" className="text-xs">{doc.doc_category}</Badge>
-                              )}
-                              {doc.industry && (
-                                <Badge variant="outline" className="text-xs">{doc.industry}</Badge>
-                              )}
-                              {doc.owner_name && (
-                                <Badge variant="outline" className="text-xs">{doc.owner_name}</Badge>
-                              )}
-                              {doc.doc_year && (
-                                <Badge variant="outline" className="text-xs">{doc.doc_year}年</Badge>
-                              )}
-                              {doc.amount_range && (
-                                <Badge variant="outline" className="text-xs">{doc.amount_range}</Badge>
-                              )}
-                              {doc.tags?.map((tag) => (
-                                <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
-                              ))}
-                            </div>
+        <div className="space-y-3">
+          {/* Select all bar */}
+          <div className="flex items-center justify-between px-1">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground">
+              <Checkbox
+                checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                onCheckedChange={toggleSelectAll}
+              />
+              全选（{selectedIds.size}/{filtered.length}）
+            </label>
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-1.5"
+                disabled={batchDeleting}
+                onClick={handleBatchDelete}
+              >
+                {batchDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                删除选中（{selectedIds.size}）
+              </Button>
+            )}
+          </div>
+
+          <div className="grid gap-3">
+            {filtered.map((doc) => {
+              const status = statusConfig[doc.ai_status] || statusConfig.pending;
+              const StatusIcon = status.icon;
+              return (
+                <Card key={doc.id} className={`hover:shadow-card-hover transition-shadow ${selectedIds.has(doc.id) ? "ring-2 ring-accent" : ""}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                          <Checkbox
+                            checked={selectedIds.has(doc.id)}
+                            onCheckedChange={() => toggleSelect(doc.id)}
+                          />
+                          <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
+                            <FileText className="w-5 h-5 text-muted-foreground" />
                           </div>
-                        )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-foreground truncate">{doc.file_name}</p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="text-xs text-muted-foreground">{formatSize(doc.file_size)}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(doc.created_at).toLocaleDateString("zh-CN")}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${status.color}`}>
+                              <StatusIcon className={`w-3 h-3 ${doc.ai_status === "processing" ? "animate-spin" : ""}`} />
+                              {status.label}
+                            </span>
+                          </div>
+                          {doc.ai_status === "completed" && (
+                            <div className="mt-2 space-y-1">
+                              {doc.ai_summary && (
+                                <p className="text-xs text-muted-foreground line-clamp-2">{doc.ai_summary}</p>
+                              )}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {doc.doc_category && (
+                                  <Badge variant="secondary" className="text-xs">{doc.doc_category}</Badge>
+                                )}
+                                {doc.industry && (
+                                  <Badge variant="outline" className="text-xs">{doc.industry}</Badge>
+                                )}
+                                {doc.owner_name && (
+                                  <Badge variant="outline" className="text-xs">{doc.owner_name}</Badge>
+                                )}
+                                {doc.doc_year && (
+                                  <Badge variant="outline" className="text-xs">{doc.doc_year}年</Badge>
+                                )}
+                                {doc.amount_range && (
+                                  <Badge variant="outline" className="text-xs">{doc.amount_range}</Badge>
+                                )}
+                                {doc.tags?.map((tag) => (
+                                  <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(doc)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(doc)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
