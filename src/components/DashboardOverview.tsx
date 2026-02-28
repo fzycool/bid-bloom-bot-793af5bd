@@ -13,6 +13,7 @@ import {
   TrendingUp,
   Clock,
   FileText,
+  Zap,
 } from "lucide-react";
 
 interface Stats {
@@ -27,6 +28,8 @@ interface Stats {
   recentAnalyses: { id: string; project_name: string | null; risk_score: number | null; created_at: string; bid_deadline: string | null; bid_location: string | null }[];
   pendingUsers?: number;
   totalUsers?: number;
+  myTokens: number;
+  allTokens?: number;
 }
 
 export default function DashboardOverview() {
@@ -37,14 +40,20 @@ export default function DashboardOverview() {
   useEffect(() => {
     if (!user) return;
     const fetchStats = async () => {
-      const [docRes, anaRes, empRes, rvRes, propRes, auditRes] = await Promise.all([
+      const [docRes, anaRes, empRes, rvRes, propRes, auditRes, anaTokenRes, propTokenRes] = await Promise.all([
         supabase.from("documents").select("id", { count: "exact", head: true }),
         supabase.from("bid_analyses").select("id, project_name, risk_score, created_at, bid_deadline, bid_location").order("created_at", { ascending: false }).limit(100),
         supabase.from("employees").select("id", { count: "exact", head: true }),
         supabase.from("resume_versions").select("id", { count: "exact", head: true }),
         supabase.from("bid_proposals").select("id", { count: "exact", head: true }),
         supabase.from("audit_reports").select("id", { count: "exact", head: true }),
+        supabase.from("bid_analyses").select("token_usage").not("token_usage", "is", null),
+        supabase.from("bid_proposals").select("token_usage").not("token_usage", "is", null),
       ]);
+
+      const sumTokens = (rows: any[]) =>
+        rows.reduce((sum, r) => sum + ((r.token_usage as any)?.total_tokens || 0), 0);
+      const myTokens = sumTokens(anaTokenRes.data || []) + sumTokens(propTokenRes.data || []);
 
       const analyses = anaRes.data || [];
       const riskScores = analyses.filter((a) => a.risk_score !== null).map((a) => a.risk_score as number);
@@ -61,15 +70,25 @@ export default function DashboardOverview() {
         highRiskAnalyses: highRisk,
         avgRiskScore: avgRisk,
         recentAnalyses: analyses.slice(0, 5),
+        myTokens,
       };
 
       if (isAdmin) {
-        const [profilesRes, pendingRes] = await Promise.all([
+        const [profilesRes, pendingRes, allAnaTokenRes, allPropTokenRes] = await Promise.all([
           supabase.from("profiles").select("id", { count: "exact", head: true }),
           supabase.from("profiles").select("id", { count: "exact", head: true }).eq("is_approved", false),
+          // Admin RLS sees all rows - these are platform totals
+          supabase.from("bid_analyses").select("token_usage, user_id").not("token_usage", "is", null),
+          supabase.from("bid_proposals").select("token_usage, user_id").not("token_usage", "is", null),
         ]);
         result.totalUsers = profilesRes.count || 0;
         result.pendingUsers = pendingRes.count || 0;
+
+        const allRows = [...(allAnaTokenRes.data || []), ...(allPropTokenRes.data || [])];
+        result.allTokens = allRows.reduce((sum, r) => sum + ((r.token_usage as any)?.total_tokens || 0), 0);
+        // Admin's own tokens
+        const myRows = allRows.filter((r: any) => r.user_id === user.id);
+        result.myTokens = myRows.reduce((sum, r) => sum + ((r.token_usage as any)?.total_tokens || 0), 0);
       }
 
       setStats(result);
@@ -87,6 +106,13 @@ export default function DashboardOverview() {
   }
 
   if (!stats) return null;
+
+  const formatTokens = (n: number) => {
+    if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B";
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+    return String(n);
+  };
 
   const riskColor = (score: number | null) => {
     if (score === null) return "text-muted-foreground";
@@ -172,6 +198,28 @@ export default function DashboardOverview() {
                 </div>
                 <div className="text-xs text-muted-foreground">方案审查率</div>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Token usage */}
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4 text-amber-500" />
+              <span className="text-sm font-semibold text-foreground">Token 用量</span>
+            </div>
+            <div className={`grid ${isAdmin ? "grid-cols-2" : "grid-cols-1"} gap-4`}>
+              <div>
+                <div className="text-2xl font-bold text-foreground whitespace-nowrap">{formatTokens(stats.myTokens)}</div>
+                <div className="text-xs text-muted-foreground">我的用量</div>
+              </div>
+              {isAdmin && stats.allTokens !== undefined && (
+                <div>
+                  <div className="text-2xl font-bold text-amber-500 whitespace-nowrap">{formatTokens(stats.allTokens)}</div>
+                  <div className="text-xs text-muted-foreground">全平台用量</div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
