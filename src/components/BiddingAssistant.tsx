@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, FileText, CheckCircle, AlertTriangle, XCircle,
@@ -2012,19 +2013,56 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
         )}
 
         {selectedProposal.ai_status === "processing" ? (
-            <Card className="flex items-center justify-center py-20">
-              <div className="text-center space-y-3">
-                <Loader2 className="w-8 h-8 mx-auto animate-spin text-accent" />
-                <p className="text-sm font-medium text-foreground">
-                  {selectedProposal.ai_progress || "正在生成投标提纲..."}
-                </p>
-                {selectedProposal.token_usage && (
-                  <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-2">
-                    <span>Prompt: {formatTokenCount(selectedProposal.token_usage.prompt_tokens)}</span>
-                    <span>Completion: {formatTokenCount(selectedProposal.token_usage.completion_tokens)}</span>
-                    <span className="font-medium text-foreground">Total: {formatTokenCount(selectedProposal.token_usage.total_tokens)}</span>
-                  </div>
-                )}
+            <Card className="py-12 px-8">
+              <div className="max-w-md mx-auto space-y-6">
+                <div className="text-center space-y-2">
+                  <Loader2 className="w-8 h-8 mx-auto animate-spin text-accent" />
+                  <p className="text-sm font-medium text-foreground">正在生成投标提纲</p>
+                </div>
+                {(() => {
+                  const steps = [
+                    { key: "prepare", label: "准备数据", match: "准备数据" },
+                    { key: "ai", label: "AI 生成提纲", match: "调用AI" },
+                    { key: "parse", label: "解析结果", match: "解析结果" },
+                    { key: "save_outline", label: "保存提纲结构", match: "保存提纲" },
+                    { key: "save_sections", label: "保存章节", match: "保存章节" },
+                  ];
+                  const progress = selectedProposal.ai_progress || "";
+                  let currentIdx = steps.findIndex(s => progress.includes(s.match));
+                  if (currentIdx === -1) currentIdx = 0;
+                  const percent = Math.round(((currentIdx + 1) / steps.length) * 100);
+                  return (
+                    <div className="space-y-4">
+                      <Progress value={percent} className="h-2" />
+                      <div className="space-y-1.5">
+                        {steps.map((step, i) => {
+                          const isDone = i < currentIdx;
+                          const isCurrent = i === currentIdx;
+                          return (
+                            <div key={step.key} className={`flex items-center gap-2 text-xs transition-all ${isDone ? "text-muted-foreground" : isCurrent ? "text-foreground font-medium" : "text-muted-foreground/50"}`}>
+                              {isDone ? (
+                                <CheckCircle className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                              ) : isCurrent ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-accent shrink-0" />
+                              ) : (
+                                <div className="w-3.5 h-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
+                              )}
+                              <span>{step.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground text-center">{progress}</p>
+                      {selectedProposal.token_usage && (
+                        <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+                          <span>Prompt: {formatTokenCount(selectedProposal.token_usage.prompt_tokens)}</span>
+                          <span>Completion: {formatTokenCount(selectedProposal.token_usage.completion_tokens)}</span>
+                          <span className="font-medium text-foreground">Total: {formatTokenCount(selectedProposal.token_usage.total_tokens)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </Card>
           ) : selectedProposal.ai_status === "failed" ? (
