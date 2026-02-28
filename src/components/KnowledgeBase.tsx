@@ -80,7 +80,7 @@ export default function KnowledgeBase() {
     if (error) {
       console.error("fetch docs error:", error);
     } else {
-      setDocuments((data as Document[]) || []);
+      setDocuments((data as Document[])?.map(d => ({ ...d, tags: Array.isArray(d.tags) ? d.tags.filter(t => t != null && t !== "") : [] })) || []);
     }
     setLoading(false);
   }, [user]);
@@ -390,7 +390,7 @@ export default function KnowledgeBase() {
                                 {doc.amount_range && (
                                   <Badge variant="outline" className="text-xs">{doc.amount_range}</Badge>
                                 )}
-                                {doc.tags?.map((tag) => (
+                                {(doc.tags || []).filter(tag => tag != null && tag !== "").map((tag) => (
                                   <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
                                 ))}
                               </div>
