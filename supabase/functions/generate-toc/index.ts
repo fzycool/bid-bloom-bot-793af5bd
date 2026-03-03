@@ -157,22 +157,14 @@ async function generateToc(supabase: any, proposalId: string) {
         continue;
       }
 
-      // Build the section path: find parent chain for context
-      let sectionLabel = "";
-      if (leaf.section_number) {
-        sectionLabel = `${leaf.section_number} ${leaf.title}`;
-      } else {
-        sectionLabel = leaf.title;
-      }
+      // Build the section path using only titles (no section numbers)
+      let sectionLabel = leaf.title;
 
-      // Find parent title for context
+      // Find parent title for context (without section number)
       if (leaf.parent_id) {
         const parent = allSections.find((s: any) => s.id === leaf.parent_id);
         if (parent) {
-          const parentLabel = parent.section_number
-            ? `${parent.section_number} ${parent.title}`
-            : parent.title;
-          sectionLabel = `${parentLabel}  ${sectionLabel}`;
+          sectionLabel = `${parent.title} ${sectionLabel}`;
         }
       }
 
