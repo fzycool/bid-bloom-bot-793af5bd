@@ -45,13 +45,26 @@ async function queryKnowledgeBase(token: string, queryText: string): Promise<str
     throw new Error(`RAGPlus查询失败: ${res.status} ${txt}`);
   }
   const json = await res.json();
+  // Log full response structure for debugging
+  console.log("RAGPlus queryKnowledgeBase response keys:", JSON.stringify(Object.keys(json || {})));
+  if (json?.data) {
+    console.log("RAGPlus data keys:", JSON.stringify(Object.keys(json.data || {})));
+    if (json.data.queryResult) {
+      console.log("RAGPlus queryResult keys:", JSON.stringify(Object.keys(json.data.queryResult)));
+    }
+  }
+  console.log("RAGPlus full response (first 500 chars):", JSON.stringify(json).substring(0, 500));
+  
   // Extract only queryResult.response from RAGPlus response
   const queryResult = json?.data?.queryResult || json?.queryResult;
   if (queryResult?.response) {
     return queryResult.response;
   }
   // Fallback: try other known paths
-  return json?.data?.answer || json?.data?.content || JSON.stringify(json);
+  const fallback = json?.data?.answer || json?.data?.content || json?.data;
+  if (fallback && typeof fallback === "string") return fallback;
+  if (fallback && typeof fallback === "object") return JSON.stringify(fallback);
+  return JSON.stringify(json);
 }
 
 serve(async (req) => {
