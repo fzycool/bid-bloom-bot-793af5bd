@@ -117,16 +117,16 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { proposalId } = await req.json();
+    const { proposalId, resume = false } = await req.json();
     if (!proposalId) throw new Error("proposalId is required");
 
     await supabase.from("bid_proposals").update({
       toc_status: "processing",
-      toc_progress: "正在登录知识库...",
+      toc_progress: resume ? "正在继续生成..." : "正在登录知识库...",
     } as any).eq("id", proposalId);
 
     EdgeRuntime.waitUntil(
-      generateToc(supabase, proposalId).catch(async (error) => {
+      generateToc(supabase, proposalId, resume).catch(async (error) => {
         console.error("generate-toc background error:", error);
         await supabase.from("bid_proposals").update({
           toc_status: "failed",
@@ -147,7 +147,7 @@ serve(async (req) => {
   }
 });
 
-async function generateToc(supabase: any, proposalId: string) {
+async function generateToc(supabase: any, proposalId: string, resume = false) {
   try {
     // 1. Login to RAGPlus
     const token = await loginRAGPlus();
@@ -168,6 +168,16 @@ async function generateToc(supabase: any, proposalId: string) {
 
     if (secErr) throw new Error(`获取章节失败: ${secErr.message}`);
     if (!allSections || allSections.length === 0) throw new Error("提纲为空，请先生成提纲");
+
+    // If not resuming, clear all existing TOC content first
+    if (!resume) {
+      await supabase.from("bid_proposals").update({
+        toc_progress: "正在清除旧目录内容...",
+      } as any).eq("id", proposalId);
+      for (const sec of allSections) {
+        await supabase.from("proposal_sections").update({ content: null }).eq("id", sec.id);
+      }
+    }
 
     // Build parent-child map
     const childMap = new Map<string, any[]>();
