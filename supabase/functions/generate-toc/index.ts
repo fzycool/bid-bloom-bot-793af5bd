@@ -63,22 +63,32 @@ async function getAiConfig(supabase: any) {
   return data;
 }
 
+interface SubSection {
+  title: string;
+  details: string;
+}
+
 async function summarizeWithAI(
   content: string,
   sectionTitle: string,
   aiUrl: string,
   aiModel: string,
   aiKey: string,
-): Promise<string> {
+): Promise<SubSection[]> {
   const prompt = `你是一个专业的投标文件编写专家。请根据以下知识库返回的内容，总结出"${sectionTitle}"章节下面的小节标题以及每个小节的注意事项。
 
 要求：
 1. 提取出所有子章节的标题，按逻辑顺序排列
-2. 每个子章节后面标注撰写时需要的注意事项
+2. 每个子章节的详情中标注撰写时需要的注意事项
 3. 如有表格要求，描述表格的格式和内容
 4. 如需盖章和签字的位置也请标注
 5. 如果有图片要求，标注需要插入图片的位置
-6. 输出格式清晰，使用Markdown格式
+
+请严格按照以下JSON格式返回，不要包含任何其他内容：
+[
+  {"title": "子章节标题1", "details": "该子章节的注意事项、书写要求、表格要求、图片位置等详细说明"},
+  {"title": "子章节标题2", "details": "..."}
+]
 
 知识库返回内容：
 ${content}`;
@@ -99,13 +109,30 @@ ${content}`;
     });
     if (!res.ok) {
       console.error("AI summarize failed:", res.status);
-      return content; // Fallback to raw content
+      return [{ title: sectionTitle, details: content }];
     }
     const json = await res.json();
-    return json?.choices?.[0]?.message?.content || content;
+    const text = json?.choices?.[0]?.message?.content || "";
+    // Extract JSON from response (may be wrapped in ```json ... ```)
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: any) => ({
+            title: String(item.title || ""),
+            details: String(item.details || item.detail || item.notes || ""),
+          })).filter((item: SubSection) => item.title.trim().length > 0);
+        }
+      } catch (parseErr) {
+        console.error("JSON parse error:", parseErr);
+      }
+    }
+    // Fallback: return as single sub-section
+    return [{ title: sectionTitle, details: text || content }];
   } catch (e) {
     console.error("AI summarize error:", e);
-    return content; // Fallback to raw content
+    return [{ title: sectionTitle, details: content }];
   }
 }
 
@@ -169,11 +196,17 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
     if (secErr) throw new Error(`获取章节失败: ${secErr.message}`);
     if (!allSections || allSections.length === 0) throw new Error("提纲为空，请先生成提纲");
 
-    // If not resuming, clear all existing TOC content first
+    // If not resuming, clear all existing TOC content and delete generated sub-sections
     if (!resume) {
       await supabase.from("bid_proposals").update({
         toc_progress: "正在清除旧目录内容...",
       } as any).eq("id", proposalId);
+      // Delete all TOC-generated child sections first
+      await supabase.from("proposal_sections")
+        .delete()
+        .eq("proposal_id", proposalId)
+        .eq("source_type", "toc_generated");
+      // Clear content on remaining sections
       for (const sec of allSections) {
         await supabase.from("proposal_sections").update({ content: null }).eq("id", sec.id);
       }
@@ -219,8 +252,9 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
         return;
       }
 
-      // Skip sections that already have content (for resume after pause)
-      if (leaf.content && !leaf.content.startsWith("[目录生成失败:") && leaf.content !== "[无知识库匹配]") {
+      // Skip sections that already have content or already have generated children (for resume)
+      const hasGeneratedChildren = childMap.has(leaf.id);
+      if (hasGeneratedChildren || (leaf.content && !leaf.content.startsWith("[目录生成失败:") && leaf.content !== "[无知识库匹配]")) {
         completed++;
         continue;
       }
@@ -253,10 +287,28 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
             toc_progress: `正在AI总结: ${leaf.section_number || ""} ${leaf.title} (${completed + 1}/${total})`,
           } as any).eq("id", proposalId);
 
-          const summarized = await summarizeWithAI(rawAnswer, sectionLabel, aiUrl, aiModel, aiKey);
+          const subSections = await summarizeWithAI(rawAnswer, sectionLabel, aiUrl, aiModel, aiKey);
+
+          // Mark parent section as processed
           await supabase.from("proposal_sections").update({
-            content: summarized,
+            content: `[已生成${subSections.length}个子章节]`,
           }).eq("id", leaf.id);
+
+          // Insert sub-sections as children of the current leaf
+          const sectionNumber = leaf.section_number || "";
+          for (let i = 0; i < subSections.length; i++) {
+            const sub = subSections[i];
+            const subNumber = sectionNumber ? `${sectionNumber}.${i + 1}` : `${i + 1}`;
+            await supabase.from("proposal_sections").insert({
+              proposal_id: proposalId,
+              parent_id: leaf.id,
+              title: sub.title,
+              content: sub.details,
+              section_number: subNumber,
+              sort_order: leaf.sort_order * 100 + i + 1,
+              source_type: "toc_generated",
+            });
+          }
         }
       } catch (queryErr: any) {
         console.error(`Query failed for section ${leaf.title}:`, queryErr);
