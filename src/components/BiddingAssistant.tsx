@@ -752,6 +752,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
     setGeneratingToc(true);
     setTocStatus("processing");
     setTocProgress(resume ? "正在继续生成..." : "正在登录知识库...");
+    setActiveTab("toc");
     try {
       // If resuming from pause, just set status back to processing so the next invoke picks up
       if (resume) {
@@ -764,6 +765,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
         body: { proposalId: selectedProposal.id },
       });
       if (error) throw error;
+      // Don't reset tocStatus here - polling will handle the state transitions
     } catch (e: any) {
       toast({ title: "目录生成失败", description: e.message, variant: "destructive" });
       setTocStatus("failed");
@@ -2167,6 +2169,12 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
               <TabsList>
                 <TabsTrigger value="outline"><FileText className="w-4 h-4 mr-1" />应答提纲</TabsTrigger>
+                <TabsTrigger value="toc">
+                  <BookOpen className="w-4 h-4 mr-1" />
+                  标书目录
+                  {tocStatus === "processing" && <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">生成中</Badge>}
+                  {tocStatus === "completed" && <Badge variant="default" className="ml-1.5 text-[10px] px-1.5 py-0">已生成</Badge>}
+                </TabsTrigger>
                 <TabsTrigger value="proposal">
                   <Sparkles className="w-4 h-4 mr-1" />
                   标书编写
@@ -2248,7 +2256,49 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
                   </Card>
                 )}
 
-                {/* TOC Generation Progress */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm">投标文件提纲</CardTitle>
+                      {sections.length > 0 && tocStatus !== "processing" && tocStatus !== "completed" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => { handleGenerateToc(); setActiveTab("toc"); }}
+                          disabled={generatingToc || tocStatus === "processing"}
+                        >
+                          {generatingToc ? (
+                            <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />提交中...</>
+                          ) : (
+                            <><BookOpen className="w-3.5 h-3.5 mr-1" />生成标书目录</>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div>
+                      {sections.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-4">暂无提纲内容</p>
+                      ) : (
+                        <div className="space-y-1">
+                          {sections.map((section) => (
+                            <SectionNode
+                              key={section.id}
+                              section={section}
+                              expanded={expandedSections}
+                              onToggle={toggleSection}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* TOC (标书目录) tab */}
+              <TabsContent value="toc" className="space-y-4">
                 {tocStatus === "processing" && (
                   <Card className="border-accent/30">
                     <CardContent className="pt-4">
@@ -2341,46 +2391,50 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
                   </Card>
                 )}
 
-                <Card>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm">投标文件提纲</CardTitle>
-                      {sections.length > 0 && tocStatus !== "processing" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleGenerateToc()}
-                          disabled={generatingToc || tocStatus === "processing"}
-                        >
-                          {generatingToc ? (
-                            <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />提交中...</>
-                          ) : (
-                            <><BookOpen className="w-3.5 h-3.5 mr-1" />生成标书目录</>
-                          )}
-                        </Button>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div>
-                      {sections.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-4">暂无提纲内容</p>
+                {tocStatus === "pending" && (
+                  <Card className="flex flex-col items-center justify-center py-16">
+                    <BookOpen className="w-10 h-10 text-accent opacity-50 mb-4" />
+                    <p className="text-sm font-medium text-foreground mb-2">尚未生成标书目录</p>
+                    <p className="text-xs text-muted-foreground mb-6 max-w-md text-center">
+                      基于应答提纲，AI将为每个章节生成详细的撰写要求、格式规范和注意事项
+                    </p>
+                    <Button onClick={() => handleGenerateToc()} disabled={generatingToc || sections.length === 0}>
+                      {generatingToc ? (
+                        <><Loader2 className="w-4 h-4 mr-1 animate-spin" />提交中...</>
                       ) : (
-                        <div className="space-y-1">
-                          {sections.map((section) => (
-                            <SectionNode
-                              key={section.id}
-                              section={section}
-                              expanded={expandedSections}
-                              onToggle={toggleSection}
-                              onViewContent={setViewingTocSection}
-                            />
-                          ))}
-                        </div>
+                        <><BookOpen className="w-4 h-4 mr-1" />生成标书目录</>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    </Button>
+                  </Card>
+                )}
+
+                {(tocStatus === "completed" || tocStatus === "paused" || tocStatus === "cancelled") && sections.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm">标书目录详情</CardTitle>
+                        <Button size="sm" variant="outline" onClick={() => handleGenerateToc(tocStatus === "paused")} disabled={generatingToc}>
+                          <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                          {tocStatus === "paused" ? "继续生成" : "重新生成"}
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-1">
+                        {sections.map((section) => (
+                          <SectionNode
+                            key={section.id}
+                            section={section}
+                            expanded={expandedSections}
+                            onToggle={toggleSection}
+                            onViewContent={setViewingTocSection}
+                            showContentInline
+                          />
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </TabsContent>
 
               {/* Proposal document tab */}
@@ -2953,12 +3007,14 @@ function SectionNode({
   onToggle,
   depth = 0,
   onViewContent,
+  showContentInline = false,
 }: {
   section: ProposalSection;
   expanded: Set<string>;
   onToggle: (id: string) => void;
   depth?: number;
   onViewContent?: (section: ProposalSection) => void;
+  showContentInline?: boolean;
 }) {
   const hasChildren = section.children && section.children.length > 0;
   const isExpanded = expanded.has(section.id);
@@ -2981,12 +3037,12 @@ function SectionNode({
               {section.section_number && <span className="text-muted-foreground mr-1">{section.section_number}</span>}
               {section.title}
             </span>
-            {hasContent && !isExpanded && (
+            {showContentInline && hasContent && !isExpanded && (
               <span className="ml-2 text-xs text-accent">●</span>
             )}
           </div>
         </button>
-        {hasContent && onViewContent && (
+        {showContentInline && hasContent && onViewContent && (
           <button
             onClick={() => onViewContent(section)}
             className="opacity-0 group-hover:opacity-100 transition-opacity mt-1.5 px-1.5 py-0.5 rounded text-xs text-accent hover:bg-accent/10 shrink-0"
@@ -2995,7 +3051,7 @@ function SectionNode({
           </button>
         )}
       </div>
-      {isExpanded && hasContent && (
+      {showContentInline && isExpanded && hasContent && (
         <div style={{ paddingLeft: depth > 0 ? 16 : 24 }} className="mb-2">
           <div className="border rounded-md p-3 bg-muted/30 text-xs text-foreground whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
             {section.content}
@@ -3005,7 +3061,7 @@ function SectionNode({
       {isExpanded && hasChildren && (
         <div>
           {section.children!.map((child) => (
-            <SectionNode key={child.id} section={child} expanded={expanded} onToggle={onToggle} depth={depth + 1} onViewContent={onViewContent} />
+            <SectionNode key={child.id} section={child} expanded={expanded} onToggle={onToggle} depth={depth + 1} onViewContent={onViewContent} showContentInline={showContentInline} />
           ))}
         </div>
       )}
