@@ -23,6 +23,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Header, Footer, LevelFormat, convertInchesToTwip, LevelSuffix } from "docx";
 import { saveAs } from "file-saver";
@@ -378,6 +381,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
   const [editingContent, setEditingContent] = useState("");
   const [highlightedText, setHighlightedText] = useState<string | null>(null);
   const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
+  const [viewingTocSection, setViewingTocSection] = useState<ProposalSection | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const centerPanelRef = useRef<HTMLDivElement>(null);
   const [collaborators, setCollaborators] = useState<{ id: string; user_id: string; email?: string; full_name?: string }[]>([]);
@@ -2369,6 +2373,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
                               section={section}
                               expanded={expandedSections}
                               onToggle={toggleSection}
+                              onViewContent={setViewingTocSection}
                             />
                           ))}
                         </div>
@@ -2920,6 +2925,24 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
           )}
         </CardContent>
       </Card>
+      {/* TOC Content Viewer Dialog */}
+      <Dialog open={!!viewingTocSection} onOpenChange={(open) => !open && setViewingTocSection(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {viewingTocSection?.section_number && (
+                <span className="text-muted-foreground mr-2">{viewingTocSection.section_number}</span>
+              )}
+              {viewingTocSection?.title}
+            </DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed pr-4">
+              {viewingTocSection?.content || "暂无内容"}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -2929,40 +2952,60 @@ function SectionNode({
   expanded,
   onToggle,
   depth = 0,
+  onViewContent,
 }: {
   section: ProposalSection;
   expanded: Set<string>;
   onToggle: (id: string) => void;
   depth?: number;
+  onViewContent?: (section: ProposalSection) => void;
 }) {
   const hasChildren = section.children && section.children.length > 0;
   const isExpanded = expanded.has(section.id);
+  const hasContent = !!section.content && section.content.trim().length > 0;
 
   return (
     <div style={{ paddingLeft: depth * 16 }}>
-      <button
-        onClick={() => onToggle(section.id)}
-        className="w-full text-left flex items-start gap-1.5 px-2 py-1.5 rounded hover:bg-secondary transition-colors"
-      >
-        {hasChildren ? (
-          isExpanded ? <ChevronDown className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <FileText className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
-        )}
-        <div className="min-w-0">
-          <span className="text-sm font-medium text-foreground">
-            {section.section_number && <span className="text-muted-foreground mr-1">{section.section_number}</span>}
-            {section.title}
-          </span>
-          {isExpanded && section.content && (
-            <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">{section.content}</p>
+      <div className="flex items-start gap-1 group">
+        <button
+          onClick={() => onToggle(section.id)}
+          className="flex-1 text-left flex items-start gap-1.5 px-2 py-1.5 rounded hover:bg-secondary transition-colors min-w-0"
+        >
+          {hasChildren ? (
+            isExpanded ? <ChevronDown className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <FileText className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
           )}
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium text-foreground">
+              {section.section_number && <span className="text-muted-foreground mr-1">{section.section_number}</span>}
+              {section.title}
+            </span>
+            {hasContent && !isExpanded && (
+              <span className="ml-2 text-xs text-accent">●</span>
+            )}
+          </div>
+        </button>
+        {hasContent && onViewContent && (
+          <button
+            onClick={() => onViewContent(section)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity mt-1.5 px-1.5 py-0.5 rounded text-xs text-accent hover:bg-accent/10 shrink-0"
+          >
+            查看
+          </button>
+        )}
+      </div>
+      {isExpanded && hasContent && (
+        <div style={{ paddingLeft: depth > 0 ? 16 : 24 }} className="mb-2">
+          <div className="border rounded-md p-3 bg-muted/30 text-xs text-foreground whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+            {section.content}
+          </div>
         </div>
-      </button>
+      )}
       {isExpanded && hasChildren && (
         <div>
           {section.children!.map((child) => (
-            <SectionNode key={child.id} section={child} expanded={expanded} onToggle={onToggle} depth={depth + 1} />
+            <SectionNode key={child.id} section={child} expanded={expanded} onToggle={onToggle} depth={depth + 1} onViewContent={onViewContent} />
           ))}
         </div>
       )}
