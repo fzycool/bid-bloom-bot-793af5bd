@@ -127,6 +127,36 @@ async function generateToc(supabase: any, proposalId: string) {
 
     // 3. For each leaf section, build prompt and query
     for (const leaf of leafSections) {
+      // Check if paused or cancelled before each section
+      const { data: statusCheck } = await supabase
+        .from("bid_proposals")
+        .select("toc_status")
+        .eq("id", proposalId)
+        .single();
+
+      const currentStatus = (statusCheck as any)?.toc_status;
+      if (currentStatus === "cancelled") {
+        console.log("TOC generation cancelled by user");
+        await supabase.from("bid_proposals").update({
+          toc_status: "cancelled",
+          toc_progress: `已取消 (已完成 ${completed}/${total})`,
+        } as any).eq("id", proposalId);
+        return;
+      }
+      if (currentStatus === "paused") {
+        console.log("TOC generation paused by user at", completed);
+        await supabase.from("bid_proposals").update({
+          toc_progress: `已暂停 (已完成 ${completed}/${total})`,
+        } as any).eq("id", proposalId);
+        return;
+      }
+
+      // Skip sections that already have content (for resume after pause)
+      if (leaf.content && !leaf.content.startsWith("[目录生成失败:")) {
+        completed++;
+        continue;
+      }
+
       // Build the section path: find parent chain for context
       let sectionLabel = "";
       if (leaf.section_number) {
