@@ -328,6 +328,15 @@ interface ProposalSection {
   children?: ProposalSection[];
 }
 
+interface TocEntry {
+  id: string;
+  parent_section_id: string | null;
+  title: string;
+  content: string | null;
+  section_number: string | null;
+  sort_order: number;
+}
+
 export default function BiddingAssistant() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -336,6 +345,7 @@ export default function BiddingAssistant() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [sections, setSections] = useState<ProposalSection[]>([]);
+  const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);
   const [materials, setMaterials] = useState<ProposalMaterial[]>([]);
 
   const [creating, setCreating] = useState(false);
@@ -631,14 +641,15 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
   }, []);
 
   const fetchProposalDetails = useCallback(async (proposalId: string) => {
-    const [{ data: secs }, { data: mats }, cms] = await Promise.all([
+    const [{ data: secs }, { data: mats }, { data: tocData }, cms] = await Promise.all([
       supabase.from("proposal_sections").select("*").eq("proposal_id", proposalId).order("sort_order"),
       supabase.from("proposal_materials").select("*").eq("proposal_id", proposalId),
+      supabase.from("proposal_toc_entries").select("*").eq("proposal_id", proposalId).order("sort_order"),
       fetchCompanyMaterials(),
     ]);
 
-    // Build tree
-    const allSections = (secs as any[]) || [];
+    // Build tree (outline only, no toc_generated)
+    const allSections = ((secs as any[]) || []).filter((s: any) => s.source_type !== "toc_generated");
     const roots: ProposalSection[] = [];
     const map = new Map<string, ProposalSection>();
     allSections.forEach((s) => { map.set(s.id, { ...s, children: [] }); });
@@ -652,6 +663,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
     });
 
     setSections(roots);
+    setTocEntries((tocData as TocEntry[]) || []);
     const proposalMats = (mats as any[]) || [];
     setMaterials(proposalMats);
     matchCompanyMaterials(proposalMats, cms);
@@ -938,6 +950,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
       const updated = { ...proposal, ai_status: "processing", ai_progress: "正在准备数据...", outline_content: null, token_usage: null };
       setSelectedProposal(updated);
       setSections([]);
+      setTocEntries([]);
       setMaterials([]);
       fetchProposals();
 
@@ -965,6 +978,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
     if (selectedProposal?.id === id) {
       setSelectedProposal(null);
       setSections([]);
+      setTocEntries([]);
       setMaterials([]);
     }
     fetchProposals();
@@ -2008,7 +2022,7 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedProposal(null); setSections([]); setMaterials([]); setShowCollabDialog(false); }}>
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedProposal(null); setSections([]); setTocEntries([]); setMaterials([]); setShowCollabDialog(false); }}>
             ← 返回列表
           </Button>
           <div className="flex-1">
@@ -2441,16 +2455,82 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-1">
-                        {sections.map((section) => (
-                          <SectionNode
-                            key={section.id}
-                            section={section}
-                            expanded={expandedSections}
-                            onToggle={toggleSection}
-                            onViewContent={setViewingTocSection}
-                            showContentInline
-                          />
-                        ))}
+                        {(() => {
+                          // Build a map of TOC entries grouped by parent_section_id
+                          const tocByParent = new Map<string, TocEntry[]>();
+                          tocEntries.forEach(e => {
+                            const pid = e.parent_section_id || "__root__";
+                            if (!tocByParent.has(pid)) tocByParent.set(pid, []);
+                            tocByParent.get(pid)!.push(e);
+                          });
+
+                          // Flatten sections to render outline + TOC children
+                          const renderSectionWithToc = (section: ProposalSection, depth = 0): React.ReactNode => {
+                            const tocChildren = tocByParent.get(section.id) || [];
+                            const hasChildren = (section.children && section.children.length > 0) || tocChildren.length > 0;
+                            const isExpanded = expandedSections.has(section.id);
+                            return (
+                              <div key={section.id}>
+                                <button
+                                  className="flex items-center gap-1.5 w-full text-left py-1.5 px-2 rounded hover:bg-muted/50 text-sm"
+                                  style={{ paddingLeft: depth * 16 + 8 }}
+                                  onClick={() => toggleSection(section.id)}
+                                >
+                                  {hasChildren ? (
+                                    isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                  ) : (
+                                    <span className="w-3.5 shrink-0" />
+                                  )}
+                                  {section.section_number && (
+                                    <span className="text-muted-foreground text-xs font-mono shrink-0">{section.section_number}</span>
+                                  )}
+                                  <span className="truncate font-medium">{section.title}</span>
+                                  {tocChildren.length > 0 && !isExpanded && (
+                                    <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 shrink-0">{tocChildren.length}项</Badge>
+                                  )}
+                                </button>
+                                {isExpanded && (
+                                  <>
+                                    {/* Render outline children */}
+                                    {section.children?.map(child => renderSectionWithToc(child, depth + 1))}
+                                    {/* Render TOC entries as leaf items */}
+                                    {tocChildren.map(toc => (
+                                      <div key={toc.id}>
+                                        <button
+                                          className="flex items-center gap-1.5 w-full text-left py-1.5 px-2 rounded hover:bg-muted/50 text-sm"
+                                          style={{ paddingLeft: (depth + 1) * 16 + 8 }}
+                                          onClick={() => toggleSection(toc.id)}
+                                        >
+                                          {toc.content ? (
+                                            expandedSections.has(toc.id) ? <ChevronDown className="w-3.5 h-3.5 text-accent shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-accent shrink-0" />
+                                          ) : (
+                                            <span className="w-3.5 shrink-0" />
+                                          )}
+                                          {toc.section_number && (
+                                            <span className="text-accent text-xs font-mono shrink-0">{toc.section_number}</span>
+                                          )}
+                                          <span className="truncate text-foreground/80">{toc.title}</span>
+                                          {toc.content && !expandedSections.has(toc.id) && (
+                                            <span className="ml-2 text-xs text-accent">●</span>
+                                          )}
+                                        </button>
+                                        {expandedSections.has(toc.id) && toc.content && (
+                                          <div style={{ paddingLeft: (depth + 2) * 16 + 8 }} className="mb-2 pr-2">
+                                            <div className="border rounded-md p-3 bg-muted/30 text-xs text-foreground whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                                              {toc.content}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </>
+                                )}
+                              </div>
+                            );
+                          };
+
+                          return sections.map(s => renderSectionWithToc(s));
+                        })()}
                       </div>
                     </CardContent>
                   </Card>

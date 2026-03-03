@@ -694,6 +694,57 @@ export type Database = {
           },
         ]
       }
+      proposal_toc_entries: {
+        Row: {
+          content: string | null
+          created_at: string
+          id: string
+          parent_section_id: string | null
+          proposal_id: string
+          section_number: string | null
+          sort_order: number
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          parent_section_id?: string | null
+          proposal_id: string
+          section_number?: string | null
+          sort_order?: number
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          parent_section_id?: string | null
+          proposal_id?: string
+          section_number?: string | null
+          sort_order?: number
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposal_toc_entries_parent_section_id_fkey"
+            columns: ["parent_section_id"]
+            isOneToOne: false
+            referencedRelation: "proposal_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_toc_entries_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "bid_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       resume_versions: {
         Row: {
           ai_status: string

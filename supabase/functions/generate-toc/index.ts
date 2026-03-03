@@ -209,19 +209,20 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
     if (secErr) throw new Error(`获取章节失败: ${secErr.message}`);
     if (!allSections || allSections.length === 0) throw new Error("提纲为空，请先生成提纲");
 
-    // If not resuming, clear all existing TOC content and delete generated sub-sections
+    // If not resuming, clear all existing TOC entries
     if (!resume) {
       await supabase.from("bid_proposals").update({
         toc_progress: "正在清除旧目录内容...",
       } as any).eq("id", proposalId);
-      // Delete all TOC-generated child sections first
-      await supabase.from("proposal_sections")
+      // Delete all TOC entries for this proposal
+      await supabase.from("proposal_toc_entries")
         .delete()
-        .eq("proposal_id", proposalId)
-        .eq("source_type", "toc_generated");
-      // Clear content on remaining sections
+        .eq("proposal_id", proposalId);
+      // Clear toc-related content markers on sections
       for (const sec of allSections) {
-        await supabase.from("proposal_sections").update({ content: null }).eq("id", sec.id);
+        if (sec.content && (sec.content.startsWith("[已生成") || sec.content.startsWith("[无知识库匹配]") || sec.content.startsWith("[目录生成失败:"))) {
+          await supabase.from("proposal_sections").update({ content: null }).eq("id", sec.id);
+        }
       }
     }
 
@@ -234,8 +235,8 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
       }
     }
 
-    // Find leaf sections (sections with no children)
-    const leafSections = allSections.filter((s: any) => !childMap.has(s.id));
+    // Find leaf sections (sections with no children that are NOT toc markers)
+    const leafSections = allSections.filter((s: any) => !childMap.has(s.id) && s.source_type !== "toc_generated");
     if (leafSections.length === 0) throw new Error("没有找到最小章节");
 
     const total = leafSections.length;
@@ -265,11 +266,20 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
         return;
       }
 
-      // Skip sections that already have content or already have generated children (for resume)
-      const hasGeneratedChildren = childMap.has(leaf.id);
-      if (hasGeneratedChildren || (leaf.content && !leaf.content.startsWith("[目录生成失败:") && leaf.content !== "[无知识库匹配]")) {
-        completed++;
-        continue;
+      // Skip sections that already have TOC entries (for resume)
+      if (resume) {
+        const { count } = await supabase.from("proposal_toc_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("parent_section_id", leaf.id);
+        if (count && count > 0) {
+          completed++;
+          continue;
+        }
+        // Also skip if marked as no match
+        if (leaf.content && (leaf.content.startsWith("[无知识库匹配]"))) {
+          completed++;
+          continue;
+        }
       }
 
       // Build section label
@@ -291,6 +301,7 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
         // Check if RAGPlus returned "no answer"
         if (rawAnswer.includes(NO_ANSWER_MARKER)) {
           console.log(`Section "${leaf.title}" has no KB match, marking as no sub-sections`);
+          // Just mark on section for resume tracking, no TOC entries needed
           await supabase.from("proposal_sections").update({
             content: "[无知识库匹配] 该章节在知识库中未找到相关内容，默认无子章节。",
           }).eq("id", leaf.id);
@@ -302,24 +313,18 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
 
           const subSections = await summarizeWithAI(rawAnswer, sectionLabel, aiUrl, aiModel, aiKey);
 
-          // Mark parent section as processed
-          await supabase.from("proposal_sections").update({
-            content: `[已生成${subSections.length}个子章节]`,
-          }).eq("id", leaf.id);
-
-          // Insert sub-sections as children of the current leaf
+          // Insert sub-sections into the separate TOC table
           const sectionNumber = leaf.section_number || "";
           for (let i = 0; i < subSections.length; i++) {
             const sub = subSections[i];
             const subNumber = sectionNumber ? `${sectionNumber}.${i + 1}` : `${i + 1}`;
-            await supabase.from("proposal_sections").insert({
+            await supabase.from("proposal_toc_entries").insert({
               proposal_id: proposalId,
-              parent_id: leaf.id,
+              parent_section_id: leaf.id,
               title: sub.title,
               content: sub.details,
               section_number: subNumber,
               sort_order: leaf.sort_order * 100 + i + 1,
-              source_type: "toc_generated",
             });
           }
         }
@@ -331,9 +336,8 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
             content: "[无知识库匹配] 知识库查询超时，该章节默认无子章节。",
           }).eq("id", leaf.id);
         } else {
-          await supabase.from("proposal_sections").update({
-            content: `[目录生成失败: ${queryErr.message}]`,
-          }).eq("id", leaf.id);
+          // Mark failure but don't pollute the outline
+          console.error(`Section "${leaf.title}" failed: ${queryErr.message}`);
         }
       }
 
