@@ -25,32 +25,45 @@ async function loginRAGPlus(): Promise<string> {
   return token;
 }
 
-async function queryKnowledgeBase(token: string, queryText: string): Promise<string> {
-  const res = await fetch(`${RAGPLUS_BASE}/api/chat/query/v3/queryKnowledgeBase`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      agentId: 477,
-      chatId: 5022,
-      v3MultiTurnEnabled: false,
-      v3MultiTurnNumber: 5,
-      queryText,
-    }),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`RAGPlus查询失败: ${res.status} ${txt}`);
+async function queryKnowledgeBase(token: string, queryText: string, timeoutMs = 40000): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${RAGPLUS_BASE}/api/chat/query/v3/queryKnowledgeBase`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        agentId: 477,
+        chatId: 5022,
+        v3MultiTurnEnabled: false,
+        v3MultiTurnNumber: 5,
+        queryText,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`RAGPlus查询失败: ${res.status} ${txt}`);
+    }
+    const json = await res.json();
+    const queryResult = json?.data?.queryResult || json?.queryResult;
+    if (queryResult?.response) return queryResult.response;
+    const fallback = json?.data?.answer || json?.data?.content || json?.data;
+    if (fallback && typeof fallback === "string") return fallback;
+    if (fallback && typeof fallback === "object") return JSON.stringify(fallback);
+    return JSON.stringify(json);
+  } catch (e: any) {
+    clearTimeout(timer);
+    if (e.name === "AbortError") {
+      console.warn(`RAGPlus查询超时(${timeoutMs}ms): ${queryText.substring(0, 50)}...`);
+      throw new Error("TIMEOUT");
+    }
+    throw e;
   }
-  const json = await res.json();
-  const queryResult = json?.data?.queryResult || json?.queryResult;
-  if (queryResult?.response) return queryResult.response;
-  const fallback = json?.data?.answer || json?.data?.content || json?.data;
-  if (fallback && typeof fallback === "string") return fallback;
-  if (fallback && typeof fallback === "object") return JSON.stringify(fallback);
-  return JSON.stringify(json);
 }
 
 async function getAiConfig(supabase: any) {
@@ -312,9 +325,16 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
         }
       } catch (queryErr: any) {
         console.error(`Query failed for section ${leaf.title}:`, queryErr);
-        await supabase.from("proposal_sections").update({
-          content: `[目录生成失败: ${queryErr.message}]`,
-        }).eq("id", leaf.id);
+        if (queryErr.message === "TIMEOUT") {
+          console.warn(`Section "${leaf.title}" timed out, treating as no KB match`);
+          await supabase.from("proposal_sections").update({
+            content: "[无知识库匹配] 知识库查询超时，该章节默认无子章节。",
+          }).eq("id", leaf.id);
+        } else {
+          await supabase.from("proposal_sections").update({
+            content: `[目录生成失败: ${queryErr.message}]`,
+          }).eq("id", leaf.id);
+        }
       }
 
       completed++;
