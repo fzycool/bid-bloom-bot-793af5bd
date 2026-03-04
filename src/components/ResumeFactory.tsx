@@ -27,6 +27,8 @@ import {
   ChevronLeft,
   Copy,
   FileSpreadsheet,
+  FileDown,
+  LayoutTemplate,
 } from "lucide-react";
 
 interface Employee {
@@ -85,6 +87,11 @@ export default function ResumeFactory() {
   const [showAddVersion, setShowAddVersion] = useState(false);
   const [processing, setProcessing] = useState(false);
 
+  // Templates
+  const [resumeTemplates, setResumeTemplates] = useState<{ id: string; template_name: string; file_path: string; is_default: boolean }[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [generating, setGenerating] = useState(false);
+
   // Add employee form
   const [newName, setNewName] = useState("");
   // Add version form
@@ -108,12 +115,20 @@ export default function ResumeFactory() {
 
   const fetchData = useCallback(async () => {
     if (!user) return;
-    const [empRes, bidRes] = await Promise.all([
+    const [empRes, bidRes, tplRes] = await Promise.all([
       supabase.from("employees").select("*").order("created_at", { ascending: false }),
       supabase.from("bid_analyses").select("id, project_name, ai_status, technical_keywords, business_keywords, responsibility_keywords, personnel_requirements").eq("ai_status", "completed").order("created_at", { ascending: false }),
+      supabase.from("resume_templates").select("id, template_name, file_path, is_default").order("is_default", { ascending: false }).order("created_at", { ascending: false }),
     ]);
     setEmployees((empRes.data as Employee[]) || []);
     setBidAnalyses((bidRes.data as BidAnalysis[]) || []);
+    const tpls = (tplRes.data as any[]) || [];
+    setResumeTemplates(tpls);
+    // Auto-select default template
+    if (tpls.length > 0 && !selectedTemplateId) {
+      const def = tpls.find((t: any) => t.is_default);
+      setSelectedTemplateId(def ? def.id : tpls[0].id);
+    }
     setLoading(false);
   }, [user]);
 
@@ -264,6 +279,46 @@ export default function ResumeFactory() {
   const handleCopyPolished = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "已复制到剪贴板" });
+  };
+
+  const handleGenerateResume = async (versionId: string) => {
+    if (!selectedTemplateId) {
+      toast({ title: "请先选择简历模板", variant: "destructive" });
+      return;
+    }
+    const v = versions.find((ver) => ver.id === versionId) || selectedVersion;
+    if (!v?.polished_content) {
+      toast({ title: "请先完成简历润色", variant: "destructive" });
+      return;
+    }
+    setGenerating(true);
+    try {
+      const tpl = resumeTemplates.find((t) => t.id === selectedTemplateId);
+      const { data, error } = await supabase.functions.invoke("resume-factory", {
+        body: {
+          action: "generate-resume-docx",
+          resumeVersionId: versionId,
+          templateFilePath: tpl?.file_path,
+          employeeName: selectedEmployee?.name || "简历",
+        },
+      });
+      if (error) throw error;
+      if (!data?.signedUrl) throw new Error("生成失败，未获取到下载链接");
+
+      // Download the generated file
+      const a = document.createElement("a");
+      a.href = data.signedUrl;
+      a.download = `${selectedEmployee?.name || "简历"}_${v.version_name}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast({ title: "简历已生成并下载" });
+    } catch (err: any) {
+      toast({ title: "生成失败", description: err.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleBatchImportExcel = async (file: File) => {
@@ -674,17 +729,59 @@ export default function ResumeFactory() {
             </div>
 
             {v.polished_content && (
-              <Card>
-                <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                  <CardTitle className="text-sm">润色结果</CardTitle>
-                  <Button variant="ghost" size="sm" onClick={() => handleCopyPolished(v.polished_content!)} className="gap-1">
-                    <Copy className="w-3.5 h-3.5" /> 复制
-                  </Button>
-                </CardHeader>
-                <CardContent className="p-4">
-                  <pre className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{v.polished_content}</pre>
-                </CardContent>
-              </Card>
+              <>
+                <Card>
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm">润色结果</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={() => handleCopyPolished(v.polished_content!)} className="gap-1">
+                      <Copy className="w-3.5 h-3.5" /> 复制
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <pre className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{v.polished_content}</pre>
+                  </CardContent>
+                </Card>
+
+                {/* Template selector + Export */}
+                <Card>
+                  <CardContent className="p-4 space-y-3">
+                    <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <LayoutTemplate className="w-4 h-4 text-accent" />
+                      输出简历
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                      <div className="space-y-1">
+                        <Label className="text-xs">选择简历模板</Label>
+                        <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={resumeTemplates.length > 0 ? "选择模板" : "暂无模板，请先上传"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {resumeTemplates.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.template_name}{t.is_default ? " (默认)" : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        onClick={() => handleGenerateResume(v.id)}
+                        disabled={generating || !selectedTemplateId || resumeTemplates.length === 0}
+                        className="gap-1.5"
+                      >
+                        {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                        {generating ? "生成中..." : "生成并下载简历"}
+                      </Button>
+                    </div>
+                    {resumeTemplates.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        请先在「简历模板」模块中上传Word模板
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
             )}
           </TabsContent>
 

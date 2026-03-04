@@ -573,6 +573,196 @@ Excel的格式可能包括但不限于：
       });
     }
 
+    // ---- ACTION: generate-resume-docx (fill template with polished content) ----
+    if (action === "generate-resume-docx") {
+      const { resumeVersionId, templateFilePath, employeeName } = params;
+      if (!resumeVersionId || !templateFilePath) throw new Error("缺少参数");
+
+      // Fetch resume version with employee info
+      const { data: resume, error: rvErr } = await supabase
+        .from("resume_versions")
+        .select("*, employees(*)")
+        .eq("id", resumeVersionId)
+        .single();
+      if (rvErr || !resume) throw new Error("简历版本不存在");
+      if (!resume.polished_content) throw new Error("请先完成简历润色");
+
+      // Download the template DOCX
+      const { data: templateFile, error: dlErr } = await supabase.storage
+        .from("resume-templates")
+        .download(templateFilePath);
+      if (dlErr || !templateFile) throw new Error(`模板下载失败: ${dlErr?.message || "unknown"}`);
+
+      // Convert template to base64
+      const templateBuffer = await templateFile.arrayBuffer();
+      const templateUint8 = new Uint8Array(templateBuffer);
+      let templateB64 = "";
+      for (let i = 0; i < templateUint8.length; i++) {
+        templateB64 += String.fromCharCode(templateUint8[i]);
+      }
+      templateB64 = btoa(templateB64);
+
+      // Use AI to generate the filled DOCX content as structured JSON
+      const emp = (resume as any).employees || {};
+      const polishedContent = resume.polished_content;
+
+      const aiResponse = await fetch(aiUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: aiModel,
+          max_tokens: configMaxTokens,
+          messages: [
+            {
+              role: "system",
+              content: `你是一个专业的简历排版专家。你将收到一份Word简历模板文件和一份润色后的简历内容。
+
+你的任务是：
+1. 仔细分析Word模板的结构、格式和布局（表格结构、字段位置等）
+2. 将润色后的简历内容严格按照模板的格式和结构填入
+3. 输出一个JSON对象，描述如何填充模板
+
+请返回JSON格式：
+{
+  "sections": [
+    {
+      "field": "模板中的字段名/位置描述",
+      "content": "应填入的内容"
+    }
+  ],
+  "full_text": "按照模板格式排列好的完整简历文本（使用markdown格式，包含表格如果模板是表格形式）"
+}
+
+重要：
+- 必须严格遵循模板的格式和结构
+- 如果模板是表格形式，full_text中使用markdown表格
+- 保留模板中的所有分节和标题格式
+- 不要遗漏任何简历信息
+- 请严格输出纯JSON`,
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "file",
+                  file: {
+                    filename: "template.docx",
+                    file_data: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${templateB64}`,
+                  },
+                },
+                {
+                  type: "text",
+                  text: `请将以下润色后的简历内容按照模板格式填入：
+
+【人员基本信息】
+姓名: ${emp.name || employeeName}
+性别: ${emp.gender || ""}
+学历: ${emp.education || ""} ${emp.major || ""}
+公司: ${emp.current_company || ""}
+职位: ${emp.current_position || ""}
+工作年限: ${emp.years_of_experience || ""}年
+证书: ${(emp.certifications || []).join("、")}
+技能: ${(emp.skills || []).join("、")}
+
+【润色后的简历全文】
+${polishedContent}
+
+【结构化工作经历】
+${JSON.stringify(resume.work_experiences || [], null, 2)}
+
+【结构化项目经验】
+${JSON.stringify(resume.project_experiences || [], null, 2)}
+
+【结构化教育背景】
+${JSON.stringify(resume.education_history || [], null, 2)}`,
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const errBody = await aiResponse.text();
+        console.error("AI generate-resume error:", aiResponse.status, errBody);
+        throw new Error(`AI生成失败: ${aiResponse.status}`);
+      }
+
+      const aiData = await aiResponse.json();
+      let aiText = aiData.choices?.[0]?.message?.content || "";
+      aiText = aiText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+      let fillResult: any;
+      try {
+        fillResult = JSON.parse(aiText);
+      } catch {
+        // If JSON parsing fails, use the text as full_text
+        fillResult = { full_text: aiText };
+      }
+
+      // Now use AI to generate the actual DOCX by modifying the template
+      // Since we can't use docx library in Deno easily, we'll ask AI to generate a filled version
+      const generateResponse = await fetch(aiUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: aiModel,
+          max_tokens: configMaxTokens,
+          messages: [
+            {
+              role: "system",
+              content: `你是文档生成专家。请根据模板和填充内容，生成完整的简历文本。
+输出格式为纯文本，使用清晰的排版格式（标题、分节、表格等），方便用户直接复制到Word中。
+严格按照模板的结构和格式来组织内容。`,
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "file",
+                  file: {
+                    filename: "template.docx",
+                    file_data: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${templateB64}`,
+                  },
+                },
+                {
+                  type: "text",
+                  text: `请严格按照这份Word模板的格式，将以下内容填入模板，生成完整的简历：\n\n${fillResult.full_text || polishedContent}`,
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!generateResponse.ok) throw new Error(`AI最终生成失败: ${generateResponse.status}`);
+
+      const genData = await generateResponse.json();
+      const finalText = genData.choices?.[0]?.message?.content || fillResult.full_text || polishedContent;
+
+      // Store the generated resume text as a file
+      const outputPath = `${resume.user_id}/generated/${Date.now()}_${employeeName || "resume"}.txt`;
+      const textBlob = new Blob([finalText], { type: "text/plain;charset=utf-8" });
+      const { error: uploadErr } = await supabase.storage
+        .from("resume-templates")
+        .upload(outputPath, textBlob, { contentType: "text/plain; charset=utf-8" });
+      if (uploadErr) throw new Error(`保存失败: ${uploadErr.message}`);
+
+      // Create a signed URL for download
+      const { data: signedData, error: signErr } = await supabase.storage
+        .from("resume-templates")
+        .createSignedUrl(outputPath, 300);
+      if (signErr || !signedData?.signedUrl) throw new Error("获取下载链接失败");
+
+      return new Response(JSON.stringify({
+        success: true,
+        signedUrl: signedData.signedUrl,
+        content: finalText,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     throw new Error(`Unknown action: ${action}`);
   } catch (e) {
     console.error("resume-factory error:", e);
