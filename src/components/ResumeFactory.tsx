@@ -729,17 +729,59 @@ export default function ResumeFactory() {
             </div>
 
             {v.polished_content && (
-              <Card>
-                <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                  <CardTitle className="text-sm">润色结果</CardTitle>
-                  <Button variant="ghost" size="sm" onClick={() => handleCopyPolished(v.polished_content!)} className="gap-1">
-                    <Copy className="w-3.5 h-3.5" /> 复制
-                  </Button>
-                </CardHeader>
-                <CardContent className="p-4">
-                  <pre className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{v.polished_content}</pre>
-                </CardContent>
-              </Card>
+              <>
+                <Card>
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm">润色结果</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={() => handleCopyPolished(v.polished_content!)} className="gap-1">
+                      <Copy className="w-3.5 h-3.5" /> 复制
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <pre className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{v.polished_content}</pre>
+                  </CardContent>
+                </Card>
+
+                {/* Template selector + Export */}
+                <Card>
+                  <CardContent className="p-4 space-y-3">
+                    <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <LayoutTemplate className="w-4 h-4 text-accent" />
+                      输出简历
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                      <div className="space-y-1">
+                        <Label className="text-xs">选择简历模板</Label>
+                        <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={resumeTemplates.length > 0 ? "选择模板" : "暂无模板，请先上传"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {resumeTemplates.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.template_name}{t.is_default ? " (默认)" : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        onClick={() => handleGenerateResume(v.id)}
+                        disabled={generating || !selectedTemplateId || resumeTemplates.length === 0}
+                        className="gap-1.5"
+                      >
+                        {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                        {generating ? "生成中..." : "生成并下载简历"}
+                      </Button>
+                    </div>
+                    {resumeTemplates.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        请先在「简历模板」模块中上传Word模板
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
             )}
           </TabsContent>
 
