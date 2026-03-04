@@ -26,6 +26,22 @@ function findAllOccurrences(text: string, pattern: string): number[] {
   return positions;
 }
 
+/** Find positions where pattern appears at the start of a line */
+function findLineStartOccurrences(text: string, pattern: string): number[] {
+  const positions: number[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const idx = text.indexOf(pattern, start);
+    if (idx < 0) break;
+    // Must be at position 0 or preceded by \n
+    if (idx === 0 || text[idx - 1] === "\n") {
+      positions.push(idx);
+    }
+    start = idx + pattern.length;
+  }
+  return positions;
+}
+
 function splitTextByChapters(
   fullText: string,
   chapters: Chapter[]
@@ -34,26 +50,31 @@ function splitTextByChapters(
 
   // For each chapter, find ALL occurrences of its title patterns
   const chapterCandidates = chapters.map((ch) => {
-    const fullPatterns = [
-      `${ch.section_number} ${ch.title}`,
-      `${ch.section_number}  ${ch.title}`,
-      `${ch.section_number}\t${ch.title}`,
-      `${ch.section_number}、${ch.title}`,
-      `${ch.section_number}.${ch.title}`,
-    ];
+    // Full patterns: section_number + separator + title
+    const seps = [" ", "  ", "\t", "、", ".", " "];
+    const fullPatterns: string[] = [];
+    for (const sep of seps) {
+      fullPatterns.push(`${ch.section_number}${sep}${ch.title}`);
+    }
+    // Also try section_number\ntitle (heading on next line)
+    fullPatterns.push(`${ch.section_number}\n${ch.title}`);
+
     const fullPositions: number[] = [];
     for (const p of fullPatterns) {
       fullPositions.push(...findAllOccurrences(fullText, p));
     }
-    // Title-only positions (for body headings without section numbers)
-    const titlePositions: number[] = [];
+
+    // Title-only positions: MUST be at start of line to avoid false matches
+    // within body text like "身份证明或授权委托书"
+    const titleLineStartPositions: number[] = [];
     if (ch.title.length >= 3) {
-      titlePositions.push(...findAllOccurrences(fullText, ch.title));
+      titleLineStartPositions.push(...findLineStartOccurrences(fullText, ch.title));
     }
+
     return {
       ...ch,
       candidates: [...new Set(fullPositions)].sort((a, b) => a - b),
-      titleCandidates: [...new Set(titlePositions)].sort((a, b) => a - b),
+      titleCandidates: [...new Set(titleLineStartPositions)].sort((a, b) => a - b),
     };
   });
 
@@ -76,14 +97,13 @@ function splitTextByChapters(
   }
 
   // Pick positions sequentially, preferring ones AFTER tocEnd
-  // Strategy: first try full pattern after tocEnd, then title-only after tocEnd
   let minPos = tocEnd;
   const located: Array<Chapter & { position: number }> = [];
 
   for (const ch of chapterCandidates) {
     let chosen = -1;
 
-    // 1. Try full pattern (section_number + title) after minPos
+    // 1. Try full pattern (section_number + title) after minPos — strongest signal
     for (const pos of ch.candidates) {
       if (pos >= minPos) {
         chosen = pos;
@@ -91,7 +111,7 @@ function splitTextByChapters(
       }
     }
 
-    // 2. If not found, try title-only after minPos
+    // 2. If not found, try title at line-start after minPos
     if (chosen < 0) {
       for (const pos of ch.titleCandidates) {
         if (pos >= minPos) {
@@ -101,7 +121,7 @@ function splitTextByChapters(
       }
     }
 
-    // 3. Last fallback: title-only after tocEnd (reset sequential constraint)
+    // 3. Last fallback: title at line-start after tocEnd
     if (chosen < 0 && tocEnd > 0) {
       for (const pos of ch.titleCandidates) {
         if (pos >= tocEnd) {
@@ -112,7 +132,7 @@ function splitTextByChapters(
     }
 
     if (chosen >= 0) {
-      console.log(`  matched "${ch.section_number} ${ch.title}" at pos=${chosen}, content_preview="${fullText.substring(chosen, chosen + 40)}"`);
+      console.log(`  matched "${ch.section_number} ${ch.title}" at pos=${chosen}, content_preview="${fullText.substring(chosen, chosen + 60).replace(/\n/g, "\\n")}"`);
       located.push({
         section_number: ch.section_number,
         title: ch.title,
@@ -120,6 +140,8 @@ function splitTextByChapters(
         position: chosen,
       });
       minPos = chosen + 1;
+    } else {
+      console.log(`  SKIPPED "${ch.section_number} ${ch.title}" — no valid position found`);
     }
   }
 
