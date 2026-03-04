@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { unzipSync } from "https://esm.sh/fflate@0.8.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,17 +7,99 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-interface Chapter {
-  section_number: string;
-  title: string;
-  level: number;
-  content?: string;
+// ── Minimal ZIP reader (no external deps) ──
+
+function readUint16(d: Uint8Array, o: number) {
+  return d[o] | (d[o + 1] << 8);
+}
+function readUint32(d: Uint8Array, o: number) {
+  return (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0;
 }
 
-function extractDocxText(data: Uint8Array): string {
-  const files = unzipSync(data);
-  const xmlBytes = files["word/document.xml"];
-  if (!xmlBytes) throw new Error("Invalid DOCX: missing document.xml");
+async function inflateRaw(compressed: Uint8Array): Promise<Uint8Array> {
+  const ds = new DecompressionStream("deflate-raw");
+  const writer = ds.writable.getWriter();
+  writer.write(compressed);
+  writer.close();
+  const reader = ds.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const result = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) {
+    result.set(c, pos);
+    pos += c.length;
+  }
+  return result;
+}
+
+async function extractFileFromZip(
+  data: Uint8Array,
+  targetName: string
+): Promise<Uint8Array> {
+  // Find End of Central Directory
+  let eocd = -1;
+  for (let i = data.length - 22; i >= Math.max(0, data.length - 65558); i--) {
+    if (
+      data[i] === 0x50 &&
+      data[i + 1] === 0x4b &&
+      data[i + 2] === 0x05 &&
+      data[i + 3] === 0x06
+    ) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("Not a valid ZIP file");
+
+  const cdOffset = readUint32(data, eocd + 16);
+  const cdEntries = readUint16(data, eocd + 10);
+
+  let pos = cdOffset;
+  for (let i = 0; i < cdEntries; i++) {
+    if (
+      data[pos] !== 0x50 ||
+      data[pos + 1] !== 0x4b ||
+      data[pos + 2] !== 0x01 ||
+      data[pos + 3] !== 0x02
+    )
+      break;
+
+    const compMethod = readUint16(data, pos + 10);
+    const compSize = readUint32(data, pos + 20);
+    const nameLen = readUint16(data, pos + 28);
+    const extraLen = readUint16(data, pos + 30);
+    const commentLen = readUint16(data, pos + 32);
+    const localOffset = readUint32(data, pos + 42);
+    const name = new TextDecoder().decode(
+      data.subarray(pos + 46, pos + 46 + nameLen)
+    );
+
+    if (name === targetName) {
+      const lNameLen = readUint16(data, localOffset + 26);
+      const lExtraLen = readUint16(data, localOffset + 28);
+      const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+      const raw = data.subarray(dataStart, dataStart + compSize);
+
+      if (compMethod === 0) return raw;
+      if (compMethod === 8) return await inflateRaw(raw);
+      throw new Error(`Unsupported compression method: ${compMethod}`);
+    }
+
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+  throw new Error(`${targetName} not found in ZIP`);
+}
+
+// ── DOCX text extraction ──
+
+async function extractDocxText(data: Uint8Array): Promise<string> {
+  const xmlBytes = await extractFileFromZip(data, "word/document.xml");
   const xml = new TextDecoder().decode(xmlBytes);
   return xml
     .replace(/<w:tab\/>/g, "\t")
@@ -34,11 +115,22 @@ function extractDocxText(data: Uint8Array): string {
     .trim();
 }
 
-function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
+// ── Chapter splitting ──
+
+interface Chapter {
+  section_number: string;
+  title: string;
+  level: number;
+  content?: string;
+}
+
+function splitTextByChapters(
+  fullText: string,
+  chapters: Chapter[]
+): Chapter[] {
   if (!chapters.length) return [];
 
   const located = chapters.map((ch) => {
-    // Try multiple patterns to find the chapter title in text
     const patterns = [
       `${ch.section_number} ${ch.title}`,
       `${ch.section_number}  ${ch.title}`,
@@ -59,12 +151,10 @@ function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
     return { ...ch, position: pos };
   });
 
-  // Keep only found chapters, sorted by position
   const found = located
     .filter((ch) => ch.position >= 0)
     .sort((a, b) => a.position - b.position);
 
-  // Remove duplicates at same position
   const unique: typeof found = [];
   for (const ch of found) {
     if (!unique.length || ch.position !== unique[unique.length - 1].position) {
@@ -72,10 +162,10 @@ function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
     }
   }
 
-  // Extract content between consecutive chapter positions
   return unique.map((ch, i) => {
     const start = ch.position;
-    const end = i + 1 < unique.length ? unique[i + 1].position : fullText.length;
+    const end =
+      i + 1 < unique.length ? unique[i + 1].position : fullText.length;
     return {
       section_number: ch.section_number,
       title: ch.title,
@@ -84,6 +174,8 @@ function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
     };
   });
 }
+
+// ── Main handler ──
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -98,7 +190,6 @@ serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Download file from storage
     const { data: fileData, error: dlErr } = await supabase.storage
       .from("company-materials")
       .download(filePath);
@@ -108,7 +199,7 @@ serve(async (req) => {
     let fullText = "";
 
     if (filePath.toLowerCase().endsWith(".docx")) {
-      fullText = extractDocxText(new Uint8Array(buf));
+      fullText = await extractDocxText(new Uint8Array(buf));
     } else {
       throw new Error("目前仅支持DOCX格式文件");
     }
@@ -117,8 +208,8 @@ serve(async (req) => {
       throw new Error("文档内容过少，无法提取章节结构");
     }
 
-    // Truncate for AI
-    const forAI = fullText.length > 80000 ? fullText.substring(0, 80000) : fullText;
+    const forAI =
+      fullText.length > 80000 ? fullText.substring(0, 80000) : fullText;
 
     const systemPrompt = `你是专业的文档结构分析师。请分析以下文档内容，提取完整的章节目录结构。
 只提取标题结构，不需要内容。注意识别所有层级的标题（一级、二级、三级等）。
@@ -140,7 +231,7 @@ serve(async (req) => {
                   properties: {
                     section_number: {
                       type: "string",
-                      description: "章节编号，如 1, 1.1, 2.3.1, 第一章",
+                      description: "章节编号",
                     },
                     title: {
                       type: "string",
@@ -148,7 +239,7 @@ serve(async (req) => {
                     },
                     level: {
                       type: "integer",
-                      description: "标题层级，1为一级标题，2为二级，以此类推",
+                      description: "标题层级，1为一级标题",
                     },
                   },
                   required: ["section_number", "title", "level"],
@@ -165,7 +256,6 @@ serve(async (req) => {
 
     let chapters: Chapter[] = [];
 
-    // Try Lovable AI first
     const lovableKey = Deno.env.get("LOVABLE_API_KEY");
     if (lovableKey) {
       try {
@@ -211,7 +301,6 @@ serve(async (req) => {
             const args = JSON.parse(toolCall.function.arguments);
             chapters = args.chapters || [];
           } else {
-            // Fallback: try parsing content as JSON
             const content = data.choices?.[0]?.message?.content || "";
             const match = content.match(/\{[\s\S]*\}/);
             if (match) {
@@ -225,7 +314,6 @@ serve(async (req) => {
       }
     }
 
-    // Fallback to configured model
     if (!chapters.length) {
       const { data: mc } = await supabase
         .from("model_config")
@@ -271,7 +359,6 @@ serve(async (req) => {
       throw new Error("AI未能识别文档章节结构，请确认文档包含清晰的章节标题");
     }
 
-    // Split original text by chapter titles to get content
     const result = splitTextByChapters(fullText, chapters);
 
     return new Response(
