@@ -37,6 +37,7 @@ const baseModules = [
   
   { id: "knowledge", label: "知识库", icon: BookOpen },
   { id: "materials", label: "公司材料", icon: Building2 },
+  { id: "templates", label: "简历模板", icon: LayoutTemplate },
 ];
 
 const Dashboard = () => {
