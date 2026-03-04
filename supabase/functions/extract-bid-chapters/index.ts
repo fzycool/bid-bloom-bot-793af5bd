@@ -14,39 +14,94 @@ interface Chapter {
   content?: string;
 }
 
+function findAllOccurrences(text: string, pattern: string): number[] {
+  const positions: number[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const idx = text.indexOf(pattern, start);
+    if (idx < 0) break;
+    positions.push(idx);
+    start = idx + pattern.length;
+  }
+  return positions;
+}
+
 function splitTextByChapters(
   fullText: string,
   chapters: Chapter[]
 ): Chapter[] {
   if (!chapters.length) return [];
 
-  const located = chapters.map((ch) => {
+  // For each chapter, find ALL occurrences of its title patterns
+  const chapterCandidates = chapters.map((ch) => {
     const patterns = [
       `${ch.section_number} ${ch.title}`,
       `${ch.section_number}  ${ch.title}`,
       `${ch.section_number}\t${ch.title}`,
       `${ch.section_number}、${ch.title}`,
       `${ch.section_number}.${ch.title}`,
-      `${ch.section_number} `,
-      ch.title,
     ];
-    let pos = -1;
+    const allPositions: number[] = [];
     for (const p of patterns) {
-      const idx = fullText.indexOf(p);
-      if (idx >= 0) {
-        pos = idx;
+      allPositions.push(...findAllOccurrences(fullText, p));
+    }
+    // Deduplicate and sort
+    const unique = [...new Set(allPositions)].sort((a, b) => a - b);
+    return { ...ch, candidates: unique };
+  });
+
+  // Detect TOC region: if many chapters cluster in a small region, that's the TOC.
+  // Collect all first-occurrence positions to detect cluster.
+  const firstPositions = chapterCandidates
+    .filter((ch) => ch.candidates.length > 0)
+    .map((ch) => ch.candidates[0])
+    .sort((a, b) => a - b);
+
+  let tocEnd = 0;
+  if (firstPositions.length >= 3) {
+    // Check if the first N chapter titles appear within a dense region (TOC)
+    // A TOC typically has many titles in a short span vs body has content between them
+    const avgGap =
+      (firstPositions[firstPositions.length - 1] - firstPositions[0]) /
+      (firstPositions.length - 1);
+    // If average gap between consecutive titles < 200 chars, likely a TOC
+    if (avgGap < 200) {
+      tocEnd = firstPositions[firstPositions.length - 1] + 50;
+    }
+  }
+
+  // Now pick positions sequentially, preferring ones AFTER tocEnd
+  let minPos = tocEnd;
+  const located: Array<Chapter & { position: number }> = [];
+
+  for (const ch of chapterCandidates) {
+    // Find the first candidate at or after minPos
+    let chosen = -1;
+    for (const pos of ch.candidates) {
+      if (pos >= minPos) {
+        chosen = pos;
         break;
       }
     }
-    return { ...ch, position: pos };
-  });
+    // Fallback: if no candidate after minPos, use last candidate (least likely TOC)
+    if (chosen < 0 && ch.candidates.length > 0) {
+      chosen = ch.candidates[ch.candidates.length - 1];
+    }
+    if (chosen >= 0) {
+      located.push({
+        section_number: ch.section_number,
+        title: ch.title,
+        level: ch.level,
+        position: chosen,
+      });
+      minPos = chosen + 1;
+    }
+  }
 
-  const found = located
-    .filter((ch) => ch.position >= 0)
-    .sort((a, b) => a.position - b.position);
-
-  const unique: typeof found = [];
-  for (const ch of found) {
+  // Sort by position and deduplicate
+  located.sort((a, b) => a.position - b.position);
+  const unique: typeof located = [];
+  for (const ch of located) {
     if (!unique.length || ch.position !== unique[unique.length - 1].position) {
       unique.push(ch);
     }
