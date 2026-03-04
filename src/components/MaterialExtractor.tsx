@@ -42,6 +42,7 @@ export default function MaterialExtractor({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileName, setFileName] = useState("");
+  const [analyzePhase, setAnalyzePhase] = useState<"uploading" | "ai" | "parsing">("uploading");
 
   const reset = () => {
     setStep("upload");
@@ -49,6 +50,7 @@ export default function MaterialExtractor({
     setSelected(new Set());
     setProgress({ current: 0, total: 0 });
     setFileName("");
+    setAnalyzePhase("uploading");
   };
 
   const handleClose = (val: boolean) => {
@@ -73,6 +75,7 @@ export default function MaterialExtractor({
 
     setFileName(file.name);
     setStep("analyzing");
+    setAnalyzePhase("uploading");
 
     try {
       // Upload to temp path
@@ -81,6 +84,8 @@ export default function MaterialExtractor({
         .from("company-materials")
         .upload(tempPath, file);
       if (upErr) throw upErr;
+
+      setAnalyzePhase("ai");
 
       // Call edge function
       const { data, error } = await supabase.functions.invoke(
@@ -95,6 +100,8 @@ export default function MaterialExtractor({
 
       if (error) throw new Error(error.message || "分析失败");
       if (data?.error) throw new Error(data.error);
+
+      setAnalyzePhase("parsing");
 
       const chs: Chapter[] = data.chapters || [];
       if (!chs.length) throw new Error("未识别到章节结构");
@@ -250,12 +257,36 @@ export default function MaterialExtractor({
         )}
 
         {step === "analyzing" && (
-          <div className="flex flex-col items-center gap-4 py-12">
+          <div className="flex flex-col items-center gap-5 py-10">
             <Loader2 className="w-10 h-10 animate-spin text-accent" />
-            <p className="text-muted-foreground">
-              正在分析文档结构，请稍候...
-            </p>
-            <p className="text-xs text-muted-foreground">{fileName}</p>
+            <div className="w-full max-w-xs space-y-3">
+              {[
+                { key: "uploading" as const, label: "上传文件" },
+                { key: "ai" as const, label: "AI 分析文档结构" },
+                { key: "parsing" as const, label: "解析章节内容" },
+              ].map((phase, idx) => {
+                const phases = ["uploading", "ai", "parsing"];
+                const currentIdx = phases.indexOf(analyzePhase);
+                const phaseIdx = idx;
+                const isDone = phaseIdx < currentIdx;
+                const isCurrent = phaseIdx === currentIdx;
+                return (
+                  <div key={phase.key} className="flex items-center gap-3">
+                    {isDone ? (
+                      <Check className="w-4 h-4 text-primary flex-shrink-0" />
+                    ) : isCurrent ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-accent flex-shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-muted-foreground/30 flex-shrink-0" />
+                    )}
+                    <span className={`text-sm ${isCurrent ? "text-foreground font-medium" : isDone ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+                      {phase.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">{fileName}</p>
           </div>
         )}
 
@@ -341,12 +372,15 @@ export default function MaterialExtractor({
 
         {step === "saving" && (
           <div className="space-y-4 py-8">
-            <p className="text-center text-sm text-muted-foreground">
-              正在保存第 {progress.current} / {progress.total} 个章节...
+            <p className="text-center text-sm font-medium">
+              正在保存章节文件...
             </p>
             <Progress
               value={(progress.current / progress.total) * 100}
             />
+            <p className="text-center text-xs text-muted-foreground">
+              {progress.current} / {progress.total} 个章节已保存
+            </p>
           </div>
         )}
 
