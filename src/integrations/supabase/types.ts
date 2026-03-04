@@ -745,6 +745,48 @@ export type Database = {
           },
         ]
       }
+      resume_templates: {
+        Row: {
+          created_at: string
+          description: string | null
+          file_name: string
+          file_path: string
+          file_size: number
+          file_type: string | null
+          id: string
+          is_default: boolean
+          template_name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          file_name: string
+          file_path: string
+          file_size?: number
+          file_type?: string | null
+          id?: string
+          is_default?: boolean
+          template_name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          file_name?: string
+          file_path?: string
+          file_size?: number
+          file_type?: string | null
+          id?: string
+          is_default?: boolean
+          template_name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       resume_versions: {
         Row: {
           ai_status: string
