@@ -59,16 +59,20 @@ function splitTextByChapters(
 
   let tocEnd = 0;
   if (firstPositions.length >= 3) {
-    // Check if the first N chapter titles appear within a dense region (TOC)
-    // A TOC typically has many titles in a short span vs body has content between them
     const avgGap =
       (firstPositions[firstPositions.length - 1] - firstPositions[0]) /
       (firstPositions.length - 1);
-    // If average gap between consecutive titles < 200 chars, likely a TOC
+    console.log("TOC detection: avgGap =", avgGap, "firstPositions count =", firstPositions.length);
     if (avgGap < 200) {
       tocEnd = firstPositions[firstPositions.length - 1] + 50;
+      console.log("TOC detected, tocEnd =", tocEnd);
     }
   }
+
+  // Debug: log candidates
+  chapterCandidates.slice(0, 5).forEach((ch, i) => {
+    console.log(`  candidates[${i}] "${ch.section_number} ${ch.title}": positions=[${ch.candidates.join(",")}]`);
+  });
 
   // Now pick positions sequentially, preferring ones AFTER tocEnd
   let minPos = tocEnd;
@@ -290,7 +294,20 @@ serve(async (req) => {
       throw new Error("AI未能识别文档章节结构，请确认文档包含清晰的章节标题");
     }
 
+    // Debug: log AI chapters and text sample
+    console.log("fullText length:", fullText.length);
+    console.log("fullText sample (first 500):", fullText.substring(0, 500));
+    console.log("AI chapters count:", chapters.length);
+    chapters.slice(0, 5).forEach((ch, i) => {
+      console.log(`  ch[${i}]: "${ch.section_number}" "${ch.title}" level=${ch.level}`);
+    });
+
     const result = splitTextByChapters(fullText, chapters);
+
+    // Debug: log content sizes
+    result.slice(0, 5).forEach((ch, i) => {
+      console.log(`  result[${i}]: "${ch.section_number} ${ch.title}" content_len=${ch.content?.length || 0}`);
+    });
 
     return new Response(
       JSON.stringify({ chapters: result, totalChapters: result.length }),
