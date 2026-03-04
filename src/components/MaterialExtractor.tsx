@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -212,6 +213,7 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [autoSelecting, setAutoSelecting] = useState(false);
   const [fileName, setFileName] = useState("");
+  const [projectPrefix, setProjectPrefix] = useState("");
   const [analyzePhase, setAnalyzePhase] = useState<"uploading" | "ai" | "parsing">("uploading");
 
   const reset = () => {
@@ -220,6 +222,7 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
     setSelected(new Set());
     setProgress({ current: 0, total: 0 });
     setFileName("");
+    setProjectPrefix("");
     setAnalyzePhase("uploading");
     parsedRef.current = null;
     zipRef.current = null;
@@ -313,6 +316,8 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
     const sel = chapters.filter((_, i) => selected.has(i));
     setProgress({ current: 0, total: sel.length });
 
+    const prefix = projectPrefix.trim() ? `${projectPrefix.trim()}_` : "";
+
     for (let i = 0; i < sel.length; i++) {
       const ch = sel[i];
       setProgress({ current: i + 1, total: sel.length });
@@ -328,7 +333,7 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
 
         await supabase.from("company_materials").insert({
           user_id: user.id,
-          file_name: `${ch.title}.docx`,
+          file_name: `${prefix}${ch.title}.docx`,
           file_path: storagePath,
           file_size: blob.size,
           file_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -404,6 +409,15 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
 
         {step === "select" && (
           <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted-foreground whitespace-nowrap">项目简称</label>
+              <Input
+                value={projectPrefix}
+                onChange={(e) => setProjectPrefix(e.target.value)}
+                placeholder="如：XX市政工程"
+                className="max-w-xs"
+              />
+            </div>
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
                 共识别 <span className="font-bold text-foreground">{chapters.length}</span> 个章节，已选{" "}
