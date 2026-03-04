@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Upload, FileText, Check } from "lucide-react";
+import { Loader2, Upload, FileText, Check, Sparkles } from "lucide-react";
 import JSZip from "jszip";
 
 // ─── DOCX XML helpers ─────────────────────────────────────────────
@@ -210,6 +210,7 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
   const [chapters, setChapters] = useState<ChapterWithRange[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [autoSelecting, setAutoSelecting] = useState(false);
   const [fileName, setFileName] = useState("");
   const [analyzePhase, setAnalyzePhase] = useState<"uploading" | "ai" | "parsing">("uploading");
 
@@ -283,6 +284,26 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
   // ── selection ──
   const toggleAll = (on: boolean) => setSelected(on ? new Set(chapters.map((_, i) => i)) : new Set());
   const toggleOne = (i: number) => { const s = new Set(selected); s.has(i) ? s.delete(i) : s.add(i); setSelected(s); };
+
+  // ── auto-select certificate chapters via AI ──
+  const handleAutoSelect = async () => {
+    if (!chapters.length) return;
+    setAutoSelecting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("classify-bid-chapters", {
+        body: { chapters: chapters.map(ch => ({ section_number: ch.section_number, title: ch.title })) },
+      });
+      if (error) throw new Error(error.message || "AI分类失败");
+      if (data?.error) throw new Error(data.error);
+      const indices: number[] = data?.selected_indices || [];
+      setSelected(new Set(indices));
+      toast({ title: "智能选择完成", description: `已自动选中 ${indices.length} 个证明文件类章节` });
+    } catch (err: any) {
+      toast({ title: "智能选择失败", description: err.message, variant: "destructive" });
+    } finally {
+      setAutoSelecting(false);
+    }
+  };
 
   // ── save ──
   const handleSave = async () => {
@@ -389,6 +410,10 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
                 <span className="font-bold text-foreground">{selected.size}</span> 个
               </p>
               <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleAutoSelect} disabled={autoSelecting} className="gap-1">
+                  {autoSelecting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  智能选择
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => toggleAll(true)}>全选</Button>
                 <Button variant="outline" size="sm" onClick={() => toggleAll(false)}>全不选</Button>
               </div>

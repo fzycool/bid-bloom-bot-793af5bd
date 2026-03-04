@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.extract-bid-chapters]
 verify_jwt = false
+
+[functions.classify-bid-chapters]
+verify_jwt = false
