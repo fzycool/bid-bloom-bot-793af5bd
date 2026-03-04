@@ -281,6 +281,46 @@ export default function ResumeFactory() {
     toast({ title: "已复制到剪贴板" });
   };
 
+  const handleGenerateResume = async (versionId: string) => {
+    if (!selectedTemplateId) {
+      toast({ title: "请先选择简历模板", variant: "destructive" });
+      return;
+    }
+    const v = versions.find((ver) => ver.id === versionId) || selectedVersion;
+    if (!v?.polished_content) {
+      toast({ title: "请先完成简历润色", variant: "destructive" });
+      return;
+    }
+    setGenerating(true);
+    try {
+      const tpl = resumeTemplates.find((t) => t.id === selectedTemplateId);
+      const { data, error } = await supabase.functions.invoke("resume-factory", {
+        body: {
+          action: "generate-resume-docx",
+          resumeVersionId: versionId,
+          templateFilePath: tpl?.file_path,
+          employeeName: selectedEmployee?.name || "简历",
+        },
+      });
+      if (error) throw error;
+      if (!data?.signedUrl) throw new Error("生成失败，未获取到下载链接");
+
+      // Download the generated file
+      const a = document.createElement("a");
+      a.href = data.signedUrl;
+      a.download = `${selectedEmployee?.name || "简历"}_${v.version_name}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast({ title: "简历已生成并下载" });
+    } catch (err: any) {
+      toast({ title: "生成失败", description: err.message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleBatchImportExcel = async (file: File) => {
     if (!user) return;
     setBatchImporting(true);
