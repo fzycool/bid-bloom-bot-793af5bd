@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import {
   Upload,
@@ -70,7 +71,11 @@ export default function CompanyMaterials() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [extractorOpen, setExtractorOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const inSelectMode = selectedIds.size > 0;
 
   const fetchMaterials = useCallback(async () => {
     if (!user) return;
@@ -174,6 +179,46 @@ export default function CompanyMaterials() {
     }
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === materials.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(materials.map((m) => m.id)));
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (!selectedIds.size) return;
+    const toDelete = materials.filter((m) => selectedIds.has(m.id));
+    setDeleting(true);
+    try {
+      // Delete storage files
+      const paths = toDelete.map((m) => m.file_path);
+      await supabase.storage.from("company-materials").remove(paths);
+      // Delete DB records
+      const { error } = await supabase
+        .from("company_materials")
+        .delete()
+        .in("id", toDelete.map((m) => m.id));
+      if (error) throw error;
+      setMaterials((prev) => prev.filter((m) => !selectedIds.has(m.id)));
+      toast({ title: `已删除 ${toDelete.length} 个材料` });
+      setSelectedIds(new Set());
+    } catch (err: any) {
+      toast({ title: "批量删除失败", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -201,30 +246,63 @@ export default function CompanyMaterials() {
           </p>
         </div>
         <div className="flex gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            multiple
-            accept=".jpg,.jpeg,.png,.webp,.bmp,.gif"
-            onChange={handleUpload}
-          />
-          <Button
-            variant="outline"
-            onClick={() => setExtractorOpen(true)}
-            className="gap-2"
-          >
-            <FileText className="w-4 h-4" />
-            材料提取
-          </Button>
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="gap-2"
-          >
-            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            上传图片
-          </Button>
+          {inSelectMode ? (
+            <>
+              <Button variant="outline" size="sm" onClick={toggleSelectAll}>
+                {selectedIds.size === materials.length ? "取消全选" : "全选"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleBatchDelete}
+                disabled={deleting}
+                className="gap-1"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                删除 ({selectedIds.size})
+              </Button>
+            </>
+          ) : (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                multiple
+                accept=".jpg,.jpeg,.png,.webp,.bmp,.gif"
+                onChange={handleUpload}
+              />
+              {materials.length > 0 && (
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedIds(new Set(materials.map((m) => m.id)))}
+                  className="gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  批量删除
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => setExtractorOpen(true)}
+                className="gap-2"
+              >
+                <FileText className="w-4 h-4" />
+                材料提取
+              </Button>
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="gap-2"
+              >
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                上传图片
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -249,13 +327,18 @@ export default function CompanyMaterials() {
             const expiry = mat.ai_status === "completed" ? getExpiryStatus(mat.expire_at) : null;
             const ExpiryIcon = expiry?.icon;
             const imgUrl = getPublicUrl(mat.file_path);
+            const isSelected = selectedIds.has(mat.id);
 
             return (
-              <Card key={mat.id} className="overflow-hidden hover:shadow-card-hover transition-shadow">
+              <Card key={mat.id} className={`overflow-hidden hover:shadow-card-hover transition-shadow ${isSelected ? "ring-2 ring-primary" : ""}`}>
                 {/* Image */}
                 <div
                   className="relative aspect-[4/3] bg-muted cursor-pointer group"
                   onClick={() => {
+                    if (inSelectMode) {
+                      toggleSelect(mat.id);
+                      return;
+                    }
                     if (isImageFile(mat)) {
                       setPreviewUrl(imgUrl);
                       setPreviewName(mat.file_name);
@@ -297,10 +380,16 @@ export default function CompanyMaterials() {
                   )}
                   {/* AI status badge */}
                   <div className="absolute top-2 left-2">
-                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm ${status.color}`}>
-                      <StatusIcon className={`w-3 h-3 ${mat.ai_status === "processing" ? "animate-spin" : ""}`} />
-                      {status.label}
-                    </span>
+                    {inSelectMode ? (
+                      <div className="bg-background rounded-sm shadow-sm p-0.5" onClick={(e) => { e.stopPropagation(); toggleSelect(mat.id); }}>
+                        <Checkbox checked={isSelected} />
+                      </div>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm ${status.color}`}>
+                        <StatusIcon className={`w-3 h-3 ${mat.ai_status === "processing" ? "animate-spin" : ""}`} />
+                        {status.label}
+                      </span>
+                    )}
                   </div>
                 </div>
 
