@@ -27,6 +27,8 @@ import {
   ChevronLeft,
   Copy,
   FileSpreadsheet,
+  FileDown,
+  LayoutTemplate,
 } from "lucide-react";
 
 interface Employee {
