@@ -169,29 +169,26 @@ function mapChaptersToChunks(
     pos += c.text.length;
   }
 
-    return chapters
-    .filter((ch) => ch.textStart >= 0)
-    .map((ch) => {
-      // Find the chunk that contains textStart
-      let sc = 0;
-      for (let j = 0; j < starts.length; j++) {
-        const chunkEnd = starts[j] + chunks[j].text.length;
-        if (ch.textStart < chunkEnd) { sc = j; break; }
-        if (j === starts.length - 1) sc = j;
-      }
-      // Find the chunk that contains textEnd (inclusive)
-      let ec = chunks.length;
-      for (let j = sc; j < starts.length; j++) {
-        if (starts[j] >= ch.textEnd) { ec = j; break; }
-      }
-      // Ensure at least one chunk is included
-      if (ec <= sc) ec = sc + 1;
-      return {
-        ...ch,
-        startChunk: Math.max(0, sc),
-        endChunk: Math.min(chunks.length, ec),
-      };
-    });
+  // Find the start chunk for each chapter (the chunk containing textStart)
+  const valid = chapters.filter((ch) => ch.textStart >= 0);
+  const withStart = valid.map((ch) => {
+    let sc = 0;
+    for (let j = 0; j < starts.length; j++) {
+      const chunkEnd = starts[j] + chunks[j].text.length;
+      if (ch.textStart < chunkEnd) { sc = j; break; }
+      if (j === starts.length - 1) sc = j;
+    }
+    return { ...ch, startChunk: Math.max(0, sc) };
+  });
+
+  // Sequential gap-free assignment:
+  // Each chapter's endChunk = next chapter's startChunk (or total chunks for last)
+  return withStart.map((ch, i) => ({
+    ...ch,
+    endChunk: i + 1 < withStart.length
+      ? withStart[i + 1].startChunk
+      : chunks.length,
+  }));
 }
 
 // ─── Component ─────────────────────────────────────────────────────
