@@ -12,15 +12,156 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2, Upload, FileText, Check } from "lucide-react";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import JSZip from "jszip";
 
-interface Chapter {
+// ─── DOCX XML helpers ─────────────────────────────────────────────
+
+interface DocxChunk {
+  xml: string;  // raw XML slice (between consecutive </w:p> boundaries)
+  text: string; // plain-text extracted from that slice
+}
+
+interface ParsedDocx {
+  chunks: DocxChunk[];
+  fullText: string;   // chunks texts joined – sent to edge function
+  docPrefix: string;  // everything before <w:body> inner content
+  sectPr: string;     // <w:sectPr …>…</w:sectPr>
+  docSuffix: string;  // </w:body></w:document>
+}
+
+function extractText(xml: string): string {
+  return xml
+    .replace(/<w:tab\/>/g, "\t")
+    .replace(/<w:br[^>]*\/>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"');
+}
+
+function parseDocxXml(docXml: string): ParsedDocx | null {
+  const bodyTag = docXml.match(/<w:body[^>]*>/);
+  if (!bodyTag) return null;
+  const bodyStart = bodyTag.index! + bodyTag[0].length;
+  const bodyEnd = docXml.lastIndexOf("</w:body>");
+  if (bodyEnd < 0) return null;
+
+  const body = docXml.substring(bodyStart, bodyEnd);
+  const sectMatch = body.match(/<w:sectPr\b[\s\S]*<\/w:sectPr>\s*$/);
+  const sectPr = sectMatch ? sectMatch[0] : "";
+  const content = sectMatch ? body.substring(0, sectMatch.index!) : body;
+
+  // Split at every </w:p> boundary (paragraph-level chunks)
+  const chunks: DocxChunk[] = [];
+  const re = /<\/w:p>/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const end = m.index + m[0].length;
+    const xml = content.substring(last, end);
+    chunks.push({ xml, text: extractText(xml) });
+    last = end;
+  }
+  if (last < content.length) {
+    const tail = content.substring(last).trim();
+    if (tail) chunks.push({ xml: tail, text: extractText(tail) });
+  }
+
+  return {
+    chunks,
+    fullText: chunks.map((c) => c.text).join(""),
+    docPrefix: docXml.substring(0, bodyStart),
+    sectPr,
+    docSuffix: docXml.substring(bodyEnd),
+  };
+}
+
+/** Build a new .docx blob by replacing document.xml body with a slice of chunks */
+async function buildChapterDocx(
+  srcZip: JSZip,
+  parsed: ParsedDocx,
+  startChunk: number,
+  endChunk: number
+): Promise<Blob> {
+  const bodyXml = parsed.chunks
+    .slice(startChunk, endChunk)
+    .map((c) => c.xml)
+    .join("");
+  const newDocXml = parsed.docPrefix + bodyXml + parsed.sectPr + parsed.docSuffix;
+
+  const out = new JSZip();
+  const jobs: Promise<void>[] = [];
+  srcZip.forEach((path, entry) => {
+    if (entry.dir) return;
+    if (path === "word/document.xml") return;
+    jobs.push(entry.async("uint8array").then((d) => { out.file(path, d); }));
+  });
+  await Promise.all(jobs);
+  out.file("word/document.xml", newDocXml);
+
+  return out.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+}
+
+// ─── Chapter mapping ───────────────────────────────────────────────
+
+interface ChapterFromAPI {
   section_number: string;
   title: string;
   level: number;
   content: string;
+  textStart: number;
+  textEnd: number;
 }
+
+interface ChapterWithRange extends ChapterFromAPI {
+  startChunk: number;
+  endChunk: number;
+}
+
+function mapChaptersToChunks(
+  chapters: ChapterFromAPI[],
+  parsed: ParsedDocx
+): ChapterWithRange[] {
+  const { chunks } = parsed;
+
+  // Build cumulative text-position array for chunks
+  const starts: number[] = [];
+  let pos = 0;
+  for (const c of chunks) {
+    starts.push(pos);
+    pos += c.text.length;
+  }
+
+  return chapters
+    .filter((ch) => ch.textStart >= 0)
+    .map((ch) => {
+      // First chunk whose text overlaps textStart
+      let sc = 0;
+      for (let j = 0; j < starts.length; j++) {
+        const end = starts[j] + chunks[j].text.length;
+        if (end <= ch.textStart) sc = j + 1;
+        else break;
+      }
+      // First chunk at or after textEnd → that's the exclusive boundary
+      let ec = chunks.length;
+      for (let j = sc; j < starts.length; j++) {
+        if (starts[j] >= ch.textEnd) { ec = j; break; }
+      }
+      return {
+        ...ch,
+        startChunk: Math.max(0, sc),
+        endChunk: Math.min(chunks.length, ec),
+      };
+    });
+}
+
+// ─── Component ─────────────────────────────────────────────────────
 
 interface Props {
   open: boolean;
@@ -28,18 +169,15 @@ interface Props {
   onComplete: () => void;
 }
 
-export default function MaterialExtractor({
-  open,
-  onOpenChange,
-  onComplete,
-}: Props) {
+export default function MaterialExtractor({ open, onOpenChange, onComplete }: Props) {
   const { user } = useAuth();
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [step, setStep] = useState<
-    "upload" | "analyzing" | "select" | "saving" | "done"
-  >("upload");
-  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const parsedRef = useRef<ParsedDocx | null>(null);
+  const zipRef = useRef<JSZip | null>(null);
+
+  const [step, setStep] = useState<"upload" | "analyzing" | "select" | "saving" | "done">("upload");
+  const [chapters, setChapters] = useState<ChapterWithRange[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fileName, setFileName] = useState("");
@@ -52,25 +190,19 @@ export default function MaterialExtractor({
     setProgress({ current: 0, total: 0 });
     setFileName("");
     setAnalyzePhase("uploading");
+    parsedRef.current = null;
+    zipRef.current = null;
   };
 
-  const handleClose = (val: boolean) => {
-    if (!val) reset();
-    onOpenChange(val);
-  };
+  const handleClose = (v: boolean) => { if (!v) reset(); onOpenChange(v); };
 
-  const handleFileSelect = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  // ── file select ──
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
     if (!/\.docx$/i.test(file.name)) {
-      toast({
-        title: "格式不支持",
-        description: "目前仅支持DOCX格式文件",
-        variant: "destructive",
-      });
+      toast({ title: "格式不支持", description: "目前仅支持DOCX格式文件", variant: "destructive" });
       return;
     }
 
@@ -79,159 +211,94 @@ export default function MaterialExtractor({
     setAnalyzePhase("uploading");
 
     try {
-      // Parse DOCX on client side to extract text
-      const arrayBuffer = await file.arrayBuffer();
-      const zip = await JSZip.loadAsync(arrayBuffer);
+      const buf = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file("word/document.xml")?.async("string");
       if (!docXml) throw new Error("无法读取DOCX文件内容");
 
-      const fullText = docXml
-        .replace(/<w:tab\/>/g, "\t")
-        .replace(/<w:br[^>]*\/>/g, "\n")
-        .replace(/<\/w:p>/g, "\n")
-        .replace(/<[^>]+>/g, "")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&amp;/g, "&")
-        .replace(/&apos;/g, "'")
-        .replace(/&quot;/g, '"')
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+      const parsed = parseDocxXml(docXml);
+      if (!parsed || !parsed.chunks.length) throw new Error("无法解析文档结构");
+      if (parsed.fullText.length < 50) throw new Error("文档内容过少，无法提取章节结构");
 
-      if (fullText.length < 50) throw new Error("文档内容过少，无法提取章节结构");
+      parsedRef.current = parsed;
+      zipRef.current = zip;
 
       setAnalyzePhase("ai");
 
-      // Send only text to edge function (no file upload needed)
-      const { data, error } = await supabase.functions.invoke(
-        "extract-bid-chapters",
-        { body: { fullText } }
-      );
-
+      const { data, error } = await supabase.functions.invoke("extract-bid-chapters", {
+        body: { fullText: parsed.fullText },
+      });
       if (error) throw new Error(error.message || "分析失败");
       if (data?.error) throw new Error(data.error);
 
       setAnalyzePhase("parsing");
 
-      const chs: Chapter[] = data.chapters || [];
+      const chs: ChapterFromAPI[] = data.chapters || [];
       if (!chs.length) throw new Error("未识别到章节结构");
 
-      setChapters(chs);
-      setSelected(new Set(chs.map((_, i) => i)));
+      const mapped = mapChaptersToChunks(chs, parsed);
+      if (!mapped.length) throw new Error("无法将章节映射到文档结构");
+
+      setChapters(mapped);
+      setSelected(new Set(mapped.map((_, i) => i)));
       setStep("select");
     } catch (err: any) {
-      toast({
-        title: "分析失败",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "分析失败", description: err.message, variant: "destructive" });
       setStep("upload");
     }
 
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (fileRef.current) fileRef.current.value = "";
   };
 
-  const toggleAll = (checked: boolean) => {
-    setSelected(checked ? new Set(chapters.map((_, i) => i)) : new Set());
-  };
+  // ── selection ──
+  const toggleAll = (on: boolean) => setSelected(on ? new Set(chapters.map((_, i) => i)) : new Set());
+  const toggleOne = (i: number) => { const s = new Set(selected); s.has(i) ? s.delete(i) : s.add(i); setSelected(s); };
 
-  const toggleOne = (idx: number) => {
-    const next = new Set(selected);
-    if (next.has(idx)) next.delete(idx);
-    else next.add(idx);
-    setSelected(next);
-  };
-
+  // ── save ──
   const handleSave = async () => {
-    if (!user || !selected.size) return;
+    if (!user || !selected.size || !parsedRef.current || !zipRef.current) return;
     setStep("saving");
 
-    const selectedChapters = chapters.filter((_, i) => selected.has(i));
-    setProgress({ current: 0, total: selectedChapters.length });
+    const sel = chapters.filter((_, i) => selected.has(i));
+    setProgress({ current: 0, total: sel.length });
 
-    for (let i = 0; i < selectedChapters.length; i++) {
-      const ch = selectedChapters[i];
-      setProgress({ current: i + 1, total: selectedChapters.length });
-
+    for (let i = 0; i < sel.length; i++) {
+      const ch = sel[i];
+      setProgress({ current: i + 1, total: sel.length });
       try {
-        // Generate .docx
-        const paragraphs = ch.content
-          .split("\n")
-          .filter((l) => l.trim())
-          .map(
-            (line) =>
-              new Paragraph({
-                children: [new TextRun({ text: line })],
-              })
-          );
-
-        const doc = new Document({
-          sections: [
-            {
-              children: [
-                new Paragraph({
-                  heading: HeadingLevel.HEADING_1,
-                  children: [
-                    new TextRun({
-                      text: `${ch.section_number} ${ch.title}`,
-                      bold: true,
-                    }),
-                  ],
-                }),
-                ...paragraphs,
-              ],
-            },
-          ],
-        });
-
-        const blob = await Packer.toBlob(doc);
-
-        // Storage path (ASCII only)
+        const blob = await buildChapterDocx(zipRef.current!, parsedRef.current!, ch.startChunk, ch.endChunk);
         const storagePath = `${user.id}/${Date.now()}_chapter_${i}.docx`;
         const { error: upErr } = await supabase.storage
           .from("company-materials")
           .upload(storagePath, blob, {
-            contentType:
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           });
         if (upErr) throw upErr;
 
-        // Insert record with display name as chapter title
-        const displayName = `${ch.section_number} ${ch.title}.docx`;
         await supabase.from("company_materials").insert({
           user_id: user.id,
-          file_name: displayName,
+          file_name: `${ch.section_number} ${ch.title}.docx`,
           file_path: storagePath,
           file_size: blob.size,
-          file_type:
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          file_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           ai_status: "completed",
           content_description: `从「${fileName}」提取的章节内容`,
           material_type: "标书章节",
         });
       } catch (err: any) {
         console.error(`Save chapter ${ch.section_number} error:`, err);
-        toast({
-          title: `保存失败: ${ch.section_number} ${ch.title}`,
-          description: err.message,
-          variant: "destructive",
-        });
+        toast({ title: `保存失败: ${ch.section_number} ${ch.title}`, description: err.message, variant: "destructive" });
       }
     }
 
     setStep("done");
-    toast({
-      title: "提取完成",
-      description: `成功保存${selectedChapters.length}个章节`,
-    });
+    toast({ title: "提取完成", description: `成功保存${sel.length}个章节` });
     onComplete();
   };
 
-  const formatContentSize = (content: string) => {
-    const len = content.length;
-    return len > 1000 ? `${(len / 1000).toFixed(1)}K字` : `${len}字`;
-  };
+  const fmtSize = (s: string) => { const n = s.length; return n > 1000 ? `${(n / 1000).toFixed(1)}K字` : `${n}字`; };
 
+  // ── render ──
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -246,22 +313,11 @@ export default function MaterialExtractor({
           <div className="flex flex-col items-center gap-4 py-8">
             <p className="text-muted-foreground text-sm text-center">
               上传现有标书文件（DOCX格式），系统将自动提取目录结构，
-              <br />
-              您可以选择需要提取的章节，保存为独立的Word文件
+              <br />您可以选择需要提取的章节，保存为独立的Word文件（保留原格式）
             </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".docx"
-              onChange={handleFileSelect}
-            />
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              className="gap-2"
-            >
-              <Upload className="w-4 h-4" />
-              选择DOCX文件
+            <input ref={fileRef} type="file" className="hidden" accept=".docx" onChange={handleFileSelect} />
+            <Button onClick={() => fileRef.current?.click()} className="gap-2">
+              <Upload className="w-4 h-4" /> 选择DOCX文件
             </Button>
           </div>
         )}
@@ -270,26 +326,21 @@ export default function MaterialExtractor({
           <div className="flex flex-col items-center gap-5 py-10">
             <Loader2 className="w-10 h-10 animate-spin text-accent" />
             <div className="w-full max-w-xs space-y-3">
-              {[
-                { key: "uploading" as const, label: "上传文件" },
-                { key: "ai" as const, label: "AI 分析文档结构" },
-                { key: "parsing" as const, label: "解析章节内容" },
-              ].map((phase, idx) => {
-                const phases = ["uploading", "ai", "parsing"];
-                const currentIdx = phases.indexOf(analyzePhase);
-                const phaseIdx = idx;
-                const isDone = phaseIdx < currentIdx;
-                const isCurrent = phaseIdx === currentIdx;
+              {([
+                { key: "uploading" as const, label: "解析文件结构" },
+                { key: "ai" as const, label: "AI 分析章节目录" },
+                { key: "parsing" as const, label: "映射章节内容" },
+              ] as const).map((phase, idx) => {
+                const order = ["uploading", "ai", "parsing"];
+                const cur = order.indexOf(analyzePhase);
+                const done = idx < cur;
+                const active = idx === cur;
                 return (
                   <div key={phase.key} className="flex items-center gap-3">
-                    {isDone ? (
-                      <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                    ) : isCurrent ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-accent flex-shrink-0" />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border border-muted-foreground/30 flex-shrink-0" />
-                    )}
-                    <span className={`text-sm ${isCurrent ? "text-foreground font-medium" : isDone ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+                    {done ? <Check className="w-4 h-4 text-primary flex-shrink-0" />
+                      : active ? <Loader2 className="w-4 h-4 animate-spin text-accent flex-shrink-0" />
+                      : <div className="w-4 h-4 rounded-full border border-muted-foreground/30 flex-shrink-0" />}
+                    <span className={`text-sm ${active ? "text-foreground font-medium" : done ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
                       {phase.label}
                     </span>
                   </div>
@@ -304,31 +355,12 @@ export default function MaterialExtractor({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                共识别{" "}
-                <span className="font-bold text-foreground">
-                  {chapters.length}
-                </span>{" "}
-                个章节，已选{" "}
-                <span className="font-bold text-foreground">
-                  {selected.size}
-                </span>{" "}
-                个
+                共识别 <span className="font-bold text-foreground">{chapters.length}</span> 个章节，已选{" "}
+                <span className="font-bold text-foreground">{selected.size}</span> 个
               </p>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => toggleAll(true)}
-                >
-                  全选
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => toggleAll(false)}
-                >
-                  全不选
-                </Button>
+                <Button variant="outline" size="sm" onClick={() => toggleAll(true)}>全选</Button>
+                <Button variant="outline" size="sm" onClick={() => toggleAll(false)}>全不选</Button>
               </div>
             </div>
 
@@ -337,44 +369,24 @@ export default function MaterialExtractor({
                 <label
                   key={idx}
                   className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
-                  style={{
-                    paddingLeft: `${(ch.level - 1) * 20 + 12}px`,
-                  }}
+                  style={{ paddingLeft: `${(ch.level - 1) * 20 + 12}px` }}
                 >
-                  <Checkbox
-                    checked={selected.has(idx)}
-                    onCheckedChange={() => toggleOne(idx)}
-                  />
+                  <Checkbox checked={selected.has(idx)} onCheckedChange={() => toggleOne(idx)} />
                   <span className="text-sm flex-1">
-                    <span className="text-muted-foreground mr-1">
-                      {ch.section_number}
-                    </span>
-                    <span
-                      className={ch.level === 1 ? "font-semibold" : ""}
-                    >
-                      {ch.title}
-                    </span>
+                    <span className="text-muted-foreground mr-1">{ch.section_number}</span>
+                    <span className={ch.level === 1 ? "font-semibold" : ""}>{ch.title}</span>
                   </span>
                   {ch.content && (
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {formatContentSize(ch.content)}
-                    </span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtSize(ch.content)}</span>
                   )}
                 </label>
               ))}
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => handleClose(false)}>
-                取消
-              </Button>
-              <Button
-                onClick={handleSave}
-                disabled={!selected.size}
-                className="gap-2"
-              >
-                <Check className="w-4 h-4" />
-                提取并保存 ({selected.size})
+              <Button variant="outline" onClick={() => handleClose(false)}>取消</Button>
+              <Button onClick={handleSave} disabled={!selected.size} className="gap-2">
+                <Check className="w-4 h-4" /> 提取并保存 ({selected.size})
               </Button>
             </div>
           </div>
@@ -382,12 +394,8 @@ export default function MaterialExtractor({
 
         {step === "saving" && (
           <div className="space-y-4 py-8">
-            <p className="text-center text-sm font-medium">
-              正在保存章节文件...
-            </p>
-            <Progress
-              value={(progress.current / progress.total) * 100}
-            />
+            <p className="text-center text-sm font-medium">正在保存章节文件...</p>
+            <Progress value={(progress.current / progress.total) * 100} />
             <p className="text-center text-xs text-muted-foreground">
               {progress.current} / {progress.total} 个章节已保存
             </p>

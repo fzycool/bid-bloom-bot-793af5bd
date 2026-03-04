@@ -141,6 +141,8 @@ function splitTextByChapters(
       title: ch.title,
       level: ch.level,
       content: fullText.substring(start, end).trim(),
+      textStart: start,
+      textEnd: end,
     };
   });
 }
