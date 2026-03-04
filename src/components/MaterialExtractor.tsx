@@ -79,6 +79,29 @@ function parseDocxXml(docXml: string): ParsedDocx | null {
   };
 }
 
+/** Extract referenced media/image IDs from XML content */
+function extractReferencedMedia(bodyXml: string, relsXml: string | null): Set<string> {
+  const targets = new Set<string>();
+  if (!relsXml) return targets;
+
+  // Find all r:id references in body XML
+  const ridRe = /r:(?:id|embed|link)="([^"]+)"/g;
+  const rids = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = ridRe.exec(bodyXml)) !== null) rids.add(m[1]);
+
+  // Parse rels to find file targets for referenced IDs
+  const relRe = /<Relationship[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g;
+  while ((m = relRe.exec(relsXml)) !== null) {
+    if (rids.has(m[1])) {
+      // Target is relative to word/ folder
+      const target = m[2].replace(/^\//, "");
+      targets.add(target.startsWith("word/") ? target : `word/${target}`);
+    }
+  }
+  return targets;
+}
+
 /** Build a new .docx blob by replacing document.xml body with a slice of chunks */
 async function buildChapterDocx(
   srcZip: JSZip,
@@ -92,11 +115,19 @@ async function buildChapterDocx(
     .join("");
   const newDocXml = parsed.docPrefix + bodyXml + parsed.sectPr + parsed.docSuffix;
 
+  // Get rels to find referenced media
+  const relsXml = await srcZip.file("word/_rels/document.xml.rels")?.async("string") || null;
+  const referencedMedia = extractReferencedMedia(bodyXml, relsXml);
+
   const out = new JSZip();
   const jobs: Promise<void>[] = [];
   srcZip.forEach((path, entry) => {
     if (entry.dir) return;
     if (path === "word/document.xml") return;
+
+    // Skip unreferenced media files to reduce size
+    if (path.startsWith("word/media/") && !referencedMedia.has(path)) return;
+
     jobs.push(entry.async("uint8array").then((d) => { out.file(path, d); }));
   });
   await Promise.all(jobs);
@@ -138,21 +169,23 @@ function mapChaptersToChunks(
     pos += c.text.length;
   }
 
-  return chapters
+    return chapters
     .filter((ch) => ch.textStart >= 0)
     .map((ch) => {
-      // First chunk whose text overlaps textStart
+      // Find the chunk that contains textStart
       let sc = 0;
       for (let j = 0; j < starts.length; j++) {
-        const end = starts[j] + chunks[j].text.length;
-        if (end <= ch.textStart) sc = j + 1;
-        else break;
+        const chunkEnd = starts[j] + chunks[j].text.length;
+        if (ch.textStart < chunkEnd) { sc = j; break; }
+        if (j === starts.length - 1) sc = j;
       }
-      // First chunk at or after textEnd → that's the exclusive boundary
+      // Find the chunk that contains textEnd (inclusive)
       let ec = chunks.length;
       for (let j = sc; j < starts.length; j++) {
         if (starts[j] >= ch.textEnd) { ec = j; break; }
       }
+      // Ensure at least one chunk is included
+      if (ec <= sc) ec = sc + 1;
       return {
         ...ch,
         startChunk: Math.max(0, sc),
@@ -277,7 +310,7 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
 
         await supabase.from("company_materials").insert({
           user_id: user.id,
-          file_name: `${ch.section_number} ${ch.title}.docx`,
+          file_name: `${ch.title}.docx`,
           file_path: storagePath,
           file_size: blob.size,
           file_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
