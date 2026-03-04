@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Upload, FileText, Check } from "lucide-react";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
+import JSZip from "jszip";
 
 interface Chapter {
   section_number: string;
@@ -78,25 +79,34 @@ export default function MaterialExtractor({
     setAnalyzePhase("uploading");
 
     try {
-      // Upload to temp path
-      const tempPath = `${user.id}/extract_${Date.now()}.docx`;
-      const { error: upErr } = await supabase.storage
-        .from("company-materials")
-        .upload(tempPath, file);
-      if (upErr) throw upErr;
+      // Parse DOCX on client side to extract text
+      const arrayBuffer = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+      const docXml = await zip.file("word/document.xml")?.async("string");
+      if (!docXml) throw new Error("无法读取DOCX文件内容");
+
+      const fullText = docXml
+        .replace(/<w:tab\/>/g, "\t")
+        .replace(/<w:br[^>]*\/>/g, "\n")
+        .replace(/<\/w:p>/g, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
+        .replace(/&apos;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+      if (fullText.length < 50) throw new Error("文档内容过少，无法提取章节结构");
 
       setAnalyzePhase("ai");
 
-      // Call edge function
+      // Send only text to edge function (no file upload needed)
       const { data, error } = await supabase.functions.invoke(
         "extract-bid-chapters",
-        { body: { filePath: tempPath } }
+        { body: { fullText } }
       );
-
-      // Clean up temp file
-      await supabase.storage
-        .from("company-materials")
-        .remove([tempPath]);
 
       if (error) throw new Error(error.message || "分析失败");
       if (data?.error) throw new Error(data.error);

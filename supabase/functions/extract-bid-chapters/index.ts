@@ -7,116 +7,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ── Minimal ZIP reader (no external deps) ──
-
-function readUint16(d: Uint8Array, o: number) {
-  return d[o] | (d[o + 1] << 8);
-}
-function readUint32(d: Uint8Array, o: number) {
-  return (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)) >>> 0;
-}
-
-async function inflateRaw(compressed: Uint8Array): Promise<Uint8Array> {
-  const ds = new DecompressionStream("deflate-raw");
-  const writer = ds.writable.getWriter();
-  writer.write(compressed);
-  writer.close();
-  const reader = ds.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  const total = chunks.reduce((s, c) => s + c.length, 0);
-  const result = new Uint8Array(total);
-  let pos = 0;
-  for (const c of chunks) {
-    result.set(c, pos);
-    pos += c.length;
-  }
-  return result;
-}
-
-async function extractFileFromZip(
-  data: Uint8Array,
-  targetName: string
-): Promise<Uint8Array> {
-  // Find End of Central Directory
-  let eocd = -1;
-  for (let i = data.length - 22; i >= Math.max(0, data.length - 65558); i--) {
-    if (
-      data[i] === 0x50 &&
-      data[i + 1] === 0x4b &&
-      data[i + 2] === 0x05 &&
-      data[i + 3] === 0x06
-    ) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) throw new Error("Not a valid ZIP file");
-
-  const cdOffset = readUint32(data, eocd + 16);
-  const cdEntries = readUint16(data, eocd + 10);
-
-  let pos = cdOffset;
-  for (let i = 0; i < cdEntries; i++) {
-    if (
-      data[pos] !== 0x50 ||
-      data[pos + 1] !== 0x4b ||
-      data[pos + 2] !== 0x01 ||
-      data[pos + 3] !== 0x02
-    )
-      break;
-
-    const compMethod = readUint16(data, pos + 10);
-    const compSize = readUint32(data, pos + 20);
-    const nameLen = readUint16(data, pos + 28);
-    const extraLen = readUint16(data, pos + 30);
-    const commentLen = readUint16(data, pos + 32);
-    const localOffset = readUint32(data, pos + 42);
-    const name = new TextDecoder().decode(
-      data.subarray(pos + 46, pos + 46 + nameLen)
-    );
-
-    if (name === targetName) {
-      const lNameLen = readUint16(data, localOffset + 26);
-      const lExtraLen = readUint16(data, localOffset + 28);
-      const dataStart = localOffset + 30 + lNameLen + lExtraLen;
-      const raw = data.subarray(dataStart, dataStart + compSize);
-
-      if (compMethod === 0) return raw;
-      if (compMethod === 8) return await inflateRaw(raw);
-      throw new Error(`Unsupported compression method: ${compMethod}`);
-    }
-
-    pos += 46 + nameLen + extraLen + commentLen;
-  }
-  throw new Error(`${targetName} not found in ZIP`);
-}
-
-// ── DOCX text extraction ──
-
-async function extractDocxText(data: Uint8Array): Promise<string> {
-  const xmlBytes = await extractFileFromZip(data, "word/document.xml");
-  const xml = new TextDecoder().decode(xmlBytes);
-  return xml
-    .replace(/<w:tab\/>/g, "\t")
-    .replace(/<w:br[^>]*\/>/g, "\n")
-    .replace(/<\/w:p>/g, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-// ── Chapter splitting ──
-
 interface Chapter {
   section_number: string;
   title: string;
@@ -175,33 +65,15 @@ function splitTextByChapters(
   });
 }
 
-// ── Main handler ──
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { filePath } = await req.json();
-    if (!filePath) throw new Error("filePath is required");
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    const { data: fileData, error: dlErr } = await supabase.storage
-      .from("company-materials")
-      .download(filePath);
-    if (dlErr) throw new Error(`下载文件失败: ${dlErr.message}`);
-
-    const buf = await fileData.arrayBuffer();
-    let fullText = "";
-
-    if (filePath.toLowerCase().endsWith(".docx")) {
-      fullText = await extractDocxText(new Uint8Array(buf));
-    } else {
-      throw new Error("目前仅支持DOCX格式文件");
+    const { fullText } = await req.json();
+    if (!fullText || typeof fullText !== "string") {
+      throw new Error("fullText is required");
     }
 
     if (fullText.length < 50) {
@@ -315,6 +187,10 @@ serve(async (req) => {
     }
 
     if (!chapters.length) {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const supabase = createClient(supabaseUrl, serviceKey);
+
       const { data: mc } = await supabase
         .from("model_config")
         .select("*")
