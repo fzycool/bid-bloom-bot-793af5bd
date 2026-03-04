@@ -87,6 +87,11 @@ export default function ResumeFactory() {
   const [showAddVersion, setShowAddVersion] = useState(false);
   const [processing, setProcessing] = useState(false);
 
+  // Templates
+  const [resumeTemplates, setResumeTemplates] = useState<{ id: string; template_name: string; file_path: string; is_default: boolean }[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [generating, setGenerating] = useState(false);
+
   // Add employee form
   const [newName, setNewName] = useState("");
   // Add version form
