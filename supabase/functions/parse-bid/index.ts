@@ -315,7 +315,7 @@ serve(async (req) => {
 
     const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
     const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
-    const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
+    const aiModel = modelConfig?.model_name || "google/gemini-2.5-flash";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
     const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
@@ -375,7 +375,6 @@ serve(async (req) => {
             ],
           });
         } else {
-          // Third-party providers: extract text from PDF
           const uint8Array = new Uint8Array(arrayBuffer);
           let textContent = "";
           try {
@@ -393,7 +392,6 @@ serve(async (req) => {
           
           if (!textContent || textContent.length < 200) {
             textContent = "[PDF文件无法直接提取文本内容]";
-            console.warn("PDF text extraction yielded insufficient text");
           }
           const MAX_CHARS = 120000;
           if (textContent.length > MAX_CHARS) {
@@ -405,7 +403,6 @@ serve(async (req) => {
           });
         }
       } else {
-        // DOCX or old DOC: extract text content
         let textContent = "";
         if (isOldDocFormat(arrayBuffer)) {
           try {
@@ -430,10 +427,8 @@ serve(async (req) => {
           await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
           throw new Error("无法从文档中提取文本内容，请尝试转换为PDF后重新上传");
         }
-        // Truncate to avoid timeout
         const MAX_CHARS = 120000;
         if (textContent.length > MAX_CHARS) {
-          console.log(`Text truncated from ${textContent.length} to ${MAX_CHARS} chars for detailed analysis`);
           textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
         }
         messages.push({
@@ -442,7 +437,6 @@ serve(async (req) => {
         });
       }
     } else {
-      // Text content mode
       messages.push({
         role: "user",
         content: `项目名称: ${projectName || "未知"}\n\n招标文件内容:\n${content}`,
@@ -460,114 +454,107 @@ serve(async (req) => {
       requestBody.tool_choice = "auto";
     }
 
-    const response = await fetch(aiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${aiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const status = response.status;
-      const body = await response.text();
-      console.error("AI error:", status, body);
-      await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-      if (status === 429) {
-        return new Response(JSON.stringify({ error: "AI服务请求过于频繁，请稍后重试" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Process AI call in background to avoid HTTP timeout
+    const bgTask = (async () => {
+      try {
+        const response = await fetch(aiUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${aiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
         });
-      }
-      if (status === 402) {
-        return new Response(JSON.stringify({ error: "AI服务额度不足" }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`AI gateway error: ${status}`);
-    }
 
-    const data = await response.json();
-    const usage = data.usage || null;
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-
-    if (toolCall?.function?.arguments) {
-      const result = repairAndParseJson(toolCall.function.arguments);
-
-      // Accumulate token usage: read existing, add new
-      let tokenData: any = null;
-      if (usage) {
-        const { data: existing } = await supabase.from("bid_analyses").select("token_usage").eq("id", analysisId).single();
-        const prev = (existing?.token_usage as any) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-        tokenData = {
-          prompt_tokens: (prev.prompt_tokens || 0) + (usage.prompt_tokens || 0),
-          completion_tokens: (prev.completion_tokens || 0) + (usage.completion_tokens || 0),
-          total_tokens: (prev.total_tokens || 0) + (usage.total_tokens || 0),
-        };
-      }
-
-      const updateData: any = {
-        scoring_table: result.scoring_table || [],
-        disqualification_items: result.disqualification_items || [],
-        trap_items: result.trap_items || [],
-        conflict_items: result.conflict_items || [],
-        technical_keywords: result.technical_keywords || [],
-        business_keywords: result.business_keywords || [],
-        responsibility_keywords: result.responsibility_keywords || [],
-        personnel_requirements: result.personnel_requirements || [],
-        summary: result.summary || "",
-        risk_score: result.risk_score ?? 50,
-        ai_status: "completed",
-      };
-      if (tokenData) updateData.token_usage = tokenData;
-      if (result.bid_location) updateData.bid_location = result.bid_location;
-      if (result.requires_presentation !== undefined && result.requires_presentation !== null) updateData.requires_presentation = result.requires_presentation;
-      if (result.deposit_amount) updateData.deposit_amount = result.deposit_amount;
-
-      // Validate bid_deadline format before including it
-      if (result.bid_deadline) {
-        try {
-          const d = new Date(result.bid_deadline);
-          if (!isNaN(d.getTime())) {
-            updateData.bid_deadline = d.toISOString();
-          } else {
-            console.warn("Invalid bid_deadline skipped:", result.bid_deadline);
-          }
-        } catch (_) {
-          console.warn("bid_deadline parse error, skipped:", result.bid_deadline);
+        if (!response.ok) {
+          const status = response.status;
+          const body = await response.text();
+          console.error("AI error:", status, body);
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          return;
         }
-      }
 
-      const { error: updateErr } = await supabase.from("bid_analyses").update(updateData).eq("id", analysisId);
-      if (updateErr) {
-        console.error("DB update failed:", updateErr.message, "Retrying without optional fields...");
-        // Retry with only core fields
-        const coreUpdate: any = {
-          scoring_table: updateData.scoring_table,
-          disqualification_items: updateData.disqualification_items,
-          trap_items: updateData.trap_items,
-          conflict_items: updateData.conflict_items,
-          technical_keywords: updateData.technical_keywords,
-          business_keywords: updateData.business_keywords,
-          responsibility_keywords: updateData.responsibility_keywords,
-          personnel_requirements: updateData.personnel_requirements,
-          summary: updateData.summary,
-          risk_score: updateData.risk_score,
-          ai_status: "completed",
-        };
-        if (tokenData) coreUpdate.token_usage = tokenData;
-        const { error: retryErr } = await supabase.from("bid_analyses").update(coreUpdate).eq("id", analysisId);
-        if (retryErr) console.error("DB retry also failed:", retryErr.message);
-      }
+        const data = await response.json();
+        const usage = data.usage || null;
+        const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
 
-      return new Response(JSON.stringify({ success: true, result, usage }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+        if (toolCall?.function?.arguments) {
+          const result = repairAndParseJson(toolCall.function.arguments);
+
+          let tokenData: any = null;
+          if (usage) {
+            const { data: existing } = await supabase.from("bid_analyses").select("token_usage").eq("id", analysisId).single();
+            const prev = (existing?.token_usage as any) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+            tokenData = {
+              prompt_tokens: (prev.prompt_tokens || 0) + (usage.prompt_tokens || 0),
+              completion_tokens: (prev.completion_tokens || 0) + (usage.completion_tokens || 0),
+              total_tokens: (prev.total_tokens || 0) + (usage.total_tokens || 0),
+            };
+          }
+
+          const updateData: any = {
+            scoring_table: result.scoring_table || [],
+            disqualification_items: result.disqualification_items || [],
+            trap_items: result.trap_items || [],
+            conflict_items: result.conflict_items || [],
+            technical_keywords: result.technical_keywords || [],
+            business_keywords: result.business_keywords || [],
+            responsibility_keywords: result.responsibility_keywords || [],
+            personnel_requirements: result.personnel_requirements || [],
+            summary: result.summary || "",
+            risk_score: result.risk_score ?? 50,
+            ai_status: "completed",
+          };
+          if (tokenData) updateData.token_usage = tokenData;
+          if (result.bid_location) updateData.bid_location = result.bid_location;
+          if (result.requires_presentation !== undefined && result.requires_presentation !== null) updateData.requires_presentation = result.requires_presentation;
+          if (result.deposit_amount) updateData.deposit_amount = result.deposit_amount;
+
+          if (result.bid_deadline) {
+            try {
+              const d = new Date(result.bid_deadline);
+              if (!isNaN(d.getTime())) {
+                updateData.bid_deadline = d.toISOString();
+              }
+            } catch (_) { /* skip */ }
+          }
+
+          const { error: updateErr } = await supabase.from("bid_analyses").update(updateData).eq("id", analysisId);
+          if (updateErr) {
+            console.error("DB update failed:", updateErr.message, "Retrying without optional fields...");
+            const coreUpdate: any = {
+              scoring_table: updateData.scoring_table,
+              disqualification_items: updateData.disqualification_items,
+              trap_items: updateData.trap_items,
+              conflict_items: updateData.conflict_items,
+              technical_keywords: updateData.technical_keywords,
+              business_keywords: updateData.business_keywords,
+              responsibility_keywords: updateData.responsibility_keywords,
+              personnel_requirements: updateData.personnel_requirements,
+              summary: updateData.summary,
+              risk_score: updateData.risk_score,
+              ai_status: "completed",
+            };
+            if (tokenData) coreUpdate.token_usage = tokenData;
+            await supabase.from("bid_analyses").update(coreUpdate).eq("id", analysisId);
+          }
+        } else {
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+        }
+      } catch (e) {
+        console.error("Background parse-bid error:", e);
+        await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+      }
+    })();
+
+    // Use EdgeRuntime.waitUntil to keep the function alive after responding
+    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
+      (globalThis as any).EdgeRuntime.waitUntil(bgTask);
     }
 
-    await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-    return new Response(JSON.stringify({ error: "AI未返回有效结果" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Return immediately - client will poll DB for results
+    return new Response(JSON.stringify({ success: true, status: "processing" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("parse-bid error:", e);
