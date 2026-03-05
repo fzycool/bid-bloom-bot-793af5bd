@@ -3,7 +3,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { unzipSync } from "npm:fflate@0.8.2";
 import * as XLSX from "npm:xlsx@0.18.5";
+import { Buffer } from "node:buffer";
 import WordExtractor from "npm:word-extractor@1.0.4";
+
+// Polyfill Buffer globally for npm packages that depend on it
+if (typeof globalThis.Buffer === "undefined") {
+  (globalThis as any).Buffer = Buffer;
+}
 
 function extractTextFromDocx(arrayBuffer: ArrayBuffer): string {
   const uint8 = new Uint8Array(arrayBuffer);
@@ -24,8 +30,7 @@ async function extractTextFromOldDoc(arrayBuffer: ArrayBuffer): Promise<string> 
     throw new Error("NOT_DOC");
   }
   const extractor = new WordExtractor();
-  const { Buffer: NodeBuffer } = await import("node:buffer");
-  const doc = await extractor.extract(NodeBuffer.from(uint8));
+  const doc = await extractor.extract(Buffer.from(uint8));
   return doc.getBody()?.trim() || "";
 }
 
