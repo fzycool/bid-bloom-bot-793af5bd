@@ -26,7 +26,8 @@ async function extractTextFromOldDoc(arrayBuffer: ArrayBuffer): Promise<string> 
     throw new Error("NOT_DOC");
   }
   const extractor = new WordExtractor();
-  const doc = await extractor.extract(Buffer.from(uint8));
+  const { Buffer: NodeBuffer } = await import("node:buffer");
+  const doc = await extractor.extract(NodeBuffer.from(uint8));
   return doc.getBody()?.trim() || "";
 }
 
