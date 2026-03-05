@@ -328,7 +328,7 @@ serve(async (req) => {
       });
     }
 
-    await supabase.from("bid_analyses").update({ ai_status: "processing" }).eq("id", analysisId);
+    await supabase.from("bid_analyses").update({ ai_status: "processing", ai_progress: "正在准备文件内容..." } as any).eq("id", analysisId);
 
     // Build messages based on input type
     const messages: any[] = [{ role: "system", content: systemPrompt }];
@@ -457,6 +457,7 @@ serve(async (req) => {
     // Process AI call in background to avoid HTTP timeout
     const bgTask = (async () => {
       try {
+        await supabase.from("bid_analyses").update({ ai_progress: "正在调用AI模型进行详细解析..." } as any).eq("id", analysisId);
         const response = await fetch(aiUrl, {
           method: "POST",
           headers: {
@@ -470,10 +471,17 @@ serve(async (req) => {
           const status = response.status;
           const body = await response.text();
           console.error("AI error:", status, body);
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          // If structure was already parsed, go back to structure_ready instead of failed
+          const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
+          if (existing?.document_structure) {
+            await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析失败: AI返回错误 (${status})，可重新尝试详细解析` } as any).eq("id", analysisId);
+          } else {
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `AI返回错误 (${status})` } as any).eq("id", analysisId);
+          }
           return;
         }
 
+        await supabase.from("bid_analyses").update({ ai_progress: "AI已返回结果，正在解析数据..." } as any).eq("id", analysisId);
         const data = await response.json();
         const usage = data.usage || null;
         const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
@@ -504,6 +512,7 @@ serve(async (req) => {
             summary: result.summary || "",
             risk_score: result.risk_score ?? 50,
             ai_status: "completed",
+            ai_progress: "解析完成",
           };
           if (tokenData) updateData.token_usage = tokenData;
           if (result.bid_location) updateData.bid_location = result.bid_location;
@@ -539,11 +548,23 @@ serve(async (req) => {
             await supabase.from("bid_analyses").update(coreUpdate).eq("id", analysisId);
           }
         } else {
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          // No tool call result - if structure exists, preserve it
+          const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
+          if (existing?.document_structure) {
+            await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: "详细解析失败: AI未返回有效数据，可重新尝试" } as any).eq("id", analysisId);
+          } else {
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "AI未返回有效数据" } as any).eq("id", analysisId);
+          }
         }
       } catch (e) {
         console.error("Background parse-bid error:", e);
-        await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+        // If structure exists, go back to structure_ready instead of failed
+        const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
+        if (existing?.document_structure) {
+          await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析出错: ${e instanceof Error ? e.message : "未知错误"}，可重新尝试` } as any).eq("id", analysisId);
+        } else {
+          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `解析出错: ${e instanceof Error ? e.message : "未知错误"}` } as any).eq("id", analysisId);
+        }
       }
     })();
 

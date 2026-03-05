@@ -66,6 +66,7 @@ export type Database = {
       }
       bid_analyses: {
         Row: {
+          ai_progress: string | null
           ai_status: string
           bid_deadline: string | null
           bid_location: string | null
@@ -93,6 +94,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_progress?: string | null
           ai_status?: string
           bid_deadline?: string | null
           bid_location?: string | null
@@ -120,6 +122,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ai_progress?: string | null
           ai_status?: string
           bid_deadline?: string | null
           bid_location?: string | null

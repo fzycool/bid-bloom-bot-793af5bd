@@ -91,6 +91,7 @@ export default function BidParser() {
   const [reAnalyzing, setReAnalyzing] = useState(false);
   const [detailParsing, setDetailParsing] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null>(null);
+  const [aiProgress, setAiProgress] = useState<string | null>(null);
   const tokenPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Poll token_usage and status from DB during parsing
@@ -105,6 +106,9 @@ export default function BidParser() {
       if (data?.token_usage) {
         const tu = data.token_usage as any;
         setTokenUsage({ prompt_tokens: tu.prompt_tokens, completion_tokens: tu.completion_tokens, total_tokens: tu.total_tokens });
+      }
+      if ((data as any)?.ai_progress) {
+        setAiProgress((data as any).ai_progress);
       }
       // Stop polling when parsing is done
       if (data && !["analyzing_structure", "processing"].includes(data.ai_status)) {
@@ -324,13 +328,23 @@ export default function BidParser() {
       await supabase.from("bid_analyses").update({ ai_status: "processing" } as any).eq("id", selectedAnalysis.id);
       setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing" } : prev);
       
+      setAiProgress(null);
       startTokenPolling(selectedAnalysis.id, (completed) => {
         if (completed.ai_status === "completed") {
           setSelectedAnalysis(completed as unknown as BidAnalysis);
+          setAiProgress(null);
           toast({ title: "详细解析完成" });
           fetchAnalyses();
-        } else if (completed.ai_status === "failed") {
-          toast({ title: "详细解析失败", variant: "destructive" });
+        } else if (completed.ai_status === "failed" || completed.ai_status === "structure_ready") {
+          // structure_ready here means detail parse failed but structure preserved
+          setSelectedAnalysis(completed as unknown as BidAnalysis);
+          const progress = (completed as any).ai_progress;
+          if (progress && progress.includes("失败")) {
+            toast({ title: "详细解析失败", description: progress, variant: "destructive" });
+          } else if (completed.ai_status === "failed") {
+            toast({ title: "详细解析失败", variant: "destructive" });
+          }
+          setAiProgress(progress || null);
         }
         setDetailParsing(false);
       });
@@ -344,8 +358,15 @@ export default function BidParser() {
       return;
     } catch (err: any) {
       toast({ title: "详细解析失败", description: err.message, variant: "destructive" });
-      await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);
-      setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "failed" } : prev);
+      // If structure exists, go back to structure_ready instead of failed
+      if (selectedAnalysis.document_structure) {
+        await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析失败: ${err.message}` } as any).eq("id", selectedAnalysis.id);
+        setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "structure_ready" } : prev);
+        setAiProgress(`详细解析失败: ${err.message}`);
+      } else {
+        await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);
+        setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "failed" } : prev);
+      }
     }
     setDetailParsing(false);
   };
@@ -582,7 +603,7 @@ export default function BidParser() {
                 <Loader2 className="w-6 h-6 animate-spin text-accent" />
                 <div>
                   <p className="font-medium text-foreground">正在进行详细解析...</p>
-                  <p className="text-sm text-muted-foreground">AI正在根据文档结构逐章节详细解读</p>
+                  <p className="text-sm text-muted-foreground">{aiProgress || "AI正在根据文档结构逐章节详细解读"}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -747,6 +768,12 @@ export default function BidParser() {
                 <FileSearch className="w-5 h-5" />
                 <h3 className="font-semibold">结构分析已完成，请开始详细解析</h3>
               </div>
+              {aiProgress && aiProgress.includes("失败") && (
+                <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {aiProgress}
+                </div>
+              )}
               <p className="text-sm text-muted-foreground">
                 AI已识别出文档的整体结构，接下来将根据上述结构，结合自定义解析清单，逐章节详细解读每一块的具体内容。
               </p>
