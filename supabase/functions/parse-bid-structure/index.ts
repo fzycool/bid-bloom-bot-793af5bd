@@ -6,6 +6,10 @@ import * as XLSX from "npm:xlsx@0.18.5";
 
 function extractTextFromDocx(arrayBuffer: ArrayBuffer): string {
   const uint8 = new Uint8Array(arrayBuffer);
+  // Verify ZIP magic bytes (DOCX is a ZIP archive)
+  if (uint8.length < 4 || uint8[0] !== 0x50 || uint8[1] !== 0x4B) {
+    throw new Error("NOT_DOCX");
+  }
   const unzipped = unzipSync(uint8);
   const docXml = unzipped["word/document.xml"];
   if (!docXml) return "";
@@ -249,7 +253,16 @@ serve(async (req) => {
         }
       } else {
         // DOCX/DOC: extract text content
-        let textContent = extractTextFromDocx(arrayBuffer);
+        let textContent = "";
+        try {
+          textContent = extractTextFromDocx(arrayBuffer);
+        } catch (docxErr: any) {
+          if (docxErr?.message === "NOT_DOCX") {
+            await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+            throw new Error("该文件不是有效的DOCX格式，请将.doc文件另存为.docx或PDF后重新上传");
+          }
+          throw docxErr;
+        }
         if (!textContent) {
           await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
           throw new Error("无法从文档中提取文本内容，请尝试转换为PDF后重新上传");
