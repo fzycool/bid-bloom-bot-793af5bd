@@ -73,50 +73,100 @@ function repairAndParseJson(jsonString: string): any {
     cleaned = cleaned.substring(jsonStart);
   }
 
-  // Remove trailing commas and control chars
-  cleaned = cleaned
-    .replace(/,\s*}/g, "}")
-    .replace(/,\s*]/g, "]")
-    .replace(/[\x00-\x1F\x7F]/g, " ");
+  // Remove control chars except newline/tab within strings
+  cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ");
 
-  // Fix unterminated strings: remove the last incomplete key-value if truncated
-  // by finding the last complete property
   try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
 
-  // Close any open strings, objects, arrays
+  // Remove trailing commas
+  cleaned = cleaned.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+  try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
+
+  // Find the last valid position by tracking JSON structure
   let inString = false;
   let escape = false;
+  let lastValidPos = 0;
+  const stack: string[] = [];
+  
   for (let i = 0; i < cleaned.length; i++) {
     const c = cleaned[i];
     if (escape) { escape = false; continue; }
-    if (c === '\\') { escape = true; continue; }
-    if (c === '"') inString = !inString;
+    if (c === '\\' && inString) { escape = true; continue; }
+    if (c === '"') { 
+      inString = !inString;
+      if (!inString) lastValidPos = i; // end of string
+      continue; 
+    }
+    if (inString) continue;
+    
+    if (c === '{' || c === '[') {
+      stack.push(c === '{' ? '}' : ']');
+      lastValidPos = i;
+    } else if (c === '}' || c === ']') {
+      if (stack.length > 0) stack.pop();
+      lastValidPos = i;
+    } else if (c === ',' || c === ':') {
+      lastValidPos = i;
+    }
   }
-  if (inString) cleaned += '"';
 
-  // Remove trailing incomplete property (after last comma)
-  cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
-
-  // Balance braces/brackets
-  let braces = 0, brackets = 0;
-  for (const c of cleaned) {
-    if (c === '{') braces++;
-    if (c === '}') braces--;
-    if (c === '[') brackets++;
-    if (c === ']') brackets--;
+  // If we're in an unterminated string, cut back to before it
+  if (inString) {
+    // Find the opening quote of the current string
+    let quotePos = cleaned.lastIndexOf('"', cleaned.length - 1);
+    // Try to close the string first
+    let attempt = cleaned.substring(0, quotePos + 1) + '"';
+    // Remove any trailing incomplete key-value pair
+    attempt = attempt.replace(/,\s*"[^"]*"\s*:\s*"[^"]*"?\s*$/, "");
+    attempt = attempt.replace(/,\s*"[^"]*"\s*$/, "");
+    attempt = attempt.replace(/,\s*$/, "");
+    
+    // Balance braces/brackets
+    let b = 0, k = 0;
+    let inStr2 = false, esc2 = false;
+    for (const ch of attempt) {
+      if (esc2) { esc2 = false; continue; }
+      if (ch === '\\' && inStr2) { esc2 = true; continue; }
+      if (ch === '"') { inStr2 = !inStr2; continue; }
+      if (inStr2) continue;
+      if (ch === '{') b++; if (ch === '}') b--;
+      if (ch === '[') k++; if (ch === ']') k--;
+    }
+    if (k > 0) attempt += ']'.repeat(k);
+    if (b > 0) attempt += '}'.repeat(b);
+    attempt = attempt.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+    
+    try { return JSON.parse(attempt); } catch (_) { /* continue */ }
   }
-  if (brackets > 0) cleaned += ']'.repeat(brackets);
-  if (braces > 0) cleaned += '}'.repeat(braces);
 
-  // Final cleanup
-  cleaned = cleaned.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
-
-  try {
-    return JSON.parse(cleaned);
-  } catch (e) {
-    console.error("JSON repair failed:", e);
-    throw new Error("AI返回的数据格式异常，请重试");
+  // Aggressive truncation: find the last complete value
+  // Look for the last }, ], or " that closes something
+  let truncated = cleaned;
+  for (let i = cleaned.length - 1; i > 0; i--) {
+    const c = cleaned[i];
+    if (c === '}' || c === ']') {
+      truncated = cleaned.substring(0, i + 1);
+      // Remove trailing commas and balance
+      truncated = truncated.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+      let b2 = 0, k2 = 0;
+      let inStr3 = false, esc3 = false;
+      for (const ch of truncated) {
+        if (esc3) { esc3 = false; continue; }
+        if (ch === '\\' && inStr3) { esc3 = true; continue; }
+        if (ch === '"') { inStr3 = !inStr3; continue; }
+        if (inStr3) continue;
+        if (ch === '{') b2++; if (ch === '}') b2--;
+        if (ch === '[') k2++; if (ch === ']') k2--;
+      }
+      if (k2 > 0) truncated += ']'.repeat(k2);
+      if (b2 > 0) truncated += '}'.repeat(b2);
+      truncated = truncated.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+      try { return JSON.parse(truncated); } catch (_) { continue; }
+    }
   }
+
+  console.error("JSON repair failed, raw length:", jsonString.length);
+  throw new Error("AI返回的数据格式异常，请重试");
 }
 
 const corsHeaders = {

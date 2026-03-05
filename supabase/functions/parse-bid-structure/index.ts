@@ -121,36 +121,71 @@ function repairAndParseJson(raw: string): any {
   if (start === -1) throw new Error("No JSON object found");
   s = s.substring(start);
 
-  // Remove trailing incomplete key-value after last comma
-  s = s.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
-  // Remove trailing incomplete array items
-  s = s.replace(/,\s*\{[^}]*$/, "");
+  // Remove control chars
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ");
+  s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+  try { return JSON.parse(s); } catch (_) { /* continue */ }
 
-  // Balance braces and brackets
-  let braces = 0, brackets = 0, inStr = false, esc = false;
+  // Check if string is unterminated
+  let inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (esc) { esc = false; continue; }
-    if (c === "\\") { esc = true; continue; }
-    if (c === '"') { inStr = !inStr; continue; }
-    if (inStr) continue;
-    if (c === "{") braces++;
-    else if (c === "}") braces--;
-    else if (c === "[") brackets++;
-    else if (c === "]") brackets--;
+    if (c === '\\' && inStr) { esc = true; continue; }
+    if (c === '"') inStr = !inStr;
   }
-
-  // Close unterminated string
   if (inStr) s += '"';
 
-  // Remove trailing comma before closing
+  // Remove trailing incomplete property/array item
+  s = s.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
+  s = s.replace(/,\s*\{[^}]*$/, "");
   s = s.replace(/,\s*$/, "");
 
-  // Append missing closers
-  for (let i = 0; i < brackets; i++) s += "]";
-  for (let i = 0; i < braces; i++) s += "}";
+  // Balance braces and brackets
+  let braces = 0, brackets = 0;
+  inStr = false; esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\' && inStr) { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === '{') braces++;
+    else if (c === '}') braces--;
+    else if (c === '[') brackets++;
+    else if (c === ']') brackets--;
+  }
 
-  return JSON.parse(s);
+  if (brackets > 0) s += ']'.repeat(brackets);
+  if (braces > 0) s += '}'.repeat(braces);
+  s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+
+  try { return JSON.parse(s); } catch (_) { /* continue */ }
+
+  // Aggressive: find last valid closing brace/bracket and truncate
+  for (let i = s.length - 1; i > 0; i--) {
+    if (s[i] === '}' || s[i] === ']') {
+      let attempt = s.substring(0, i + 1);
+      attempt = attempt.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+      let b = 0, k = 0;
+      let is2 = false, e2 = false;
+      for (const ch of attempt) {
+        if (e2) { e2 = false; continue; }
+        if (ch === '\\' && is2) { e2 = true; continue; }
+        if (ch === '"') { is2 = !is2; continue; }
+        if (is2) continue;
+        if (ch === '{') b++; if (ch === '}') b--;
+        if (ch === '[') k++; if (ch === ']') k--;
+      }
+      if (k > 0) attempt += ']'.repeat(k);
+      if (b > 0) attempt += '}'.repeat(b);
+      attempt = attempt.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+      try { return JSON.parse(attempt); } catch (_) { continue; }
+    }
+  }
+
+  console.error("JSON repair failed, raw length:", raw.length);
+  throw new Error("AI返回的数据格式异常，请重试");
 }
 
 const SYSTEM_PROMPT = `你是一位资深招投标专家。请分析以下招标文件，提取其整体结构（章节目录树）。
