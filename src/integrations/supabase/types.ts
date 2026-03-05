@@ -293,6 +293,7 @@ export type Database = {
         Row: {
           ai_extracted_info: Json | null
           ai_status: string
+          bid_analysis_id: string | null
           certificate_number: string | null
           content_description: string | null
           created_at: string
@@ -311,6 +312,7 @@ export type Database = {
         Insert: {
           ai_extracted_info?: Json | null
           ai_status?: string
+          bid_analysis_id?: string | null
           certificate_number?: string | null
           content_description?: string | null
           created_at?: string
@@ -329,6 +331,7 @@ export type Database = {
         Update: {
           ai_extracted_info?: Json | null
           ai_status?: string
+          bid_analysis_id?: string | null
           certificate_number?: string | null
           content_description?: string | null
           created_at?: string
@@ -344,7 +347,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "company_materials_bid_analysis_id_fkey"
+            columns: ["bid_analysis_id"]
+            isOneToOne: false
+            referencedRelation: "bid_analyses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contract_revisions: {
         Row: {
