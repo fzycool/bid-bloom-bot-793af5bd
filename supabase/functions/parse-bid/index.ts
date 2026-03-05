@@ -454,128 +454,144 @@ serve(async (req) => {
       requestBody.tool_choice = "auto";
     }
 
-    // Process AI call in background to avoid HTTP timeout
-    const bgTask = (async () => {
-      try {
-        await supabase.from("bid_analyses").update({ ai_progress: "正在调用AI模型进行详细解析..." } as any).eq("id", analysisId);
-        const response = await fetch(aiUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${aiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestBody),
-        });
+    // Use streaming response to keep HTTP connection alive during AI processing
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (data: any) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
 
-        if (!response.ok) {
-          const status = response.status;
-          const body = await response.text();
-          console.error("AI error:", status, body);
-          // If structure was already parsed, go back to structure_ready instead of failed
-          const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
-          if (existing?.document_structure) {
-            await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析失败: AI返回错误 (${status})，可重新尝试详细解析` } as any).eq("id", analysisId);
-          } else {
-            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `AI返回错误 (${status})` } as any).eq("id", analysisId);
-          }
-          return;
-        }
+        try {
+          sendEvent({ type: "progress", message: "正在调用AI模型进行详细解析..." });
+          await supabase.from("bid_analyses").update({ ai_progress: "正在调用AI模型进行详细解析..." } as any).eq("id", analysisId);
 
-        await supabase.from("bid_analyses").update({ ai_progress: "AI已返回结果，正在解析数据..." } as any).eq("id", analysisId);
-        const data = await response.json();
-        const usage = data.usage || null;
-        const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+          // Heartbeat every 15s to keep connection alive
+          const heartbeat = setInterval(() => {
+            sendEvent({ type: "heartbeat" });
+          }, 15000);
 
-        if (toolCall?.function?.arguments) {
-          const result = repairAndParseJson(toolCall.function.arguments);
+          const response = await fetch(aiUrl, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${aiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(requestBody),
+          });
 
-          let tokenData: any = null;
-          if (usage) {
-            const { data: existing } = await supabase.from("bid_analyses").select("token_usage").eq("id", analysisId).single();
-            const prev = (existing?.token_usage as any) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-            tokenData = {
-              prompt_tokens: (prev.prompt_tokens || 0) + (usage.prompt_tokens || 0),
-              completion_tokens: (prev.completion_tokens || 0) + (usage.completion_tokens || 0),
-              total_tokens: (prev.total_tokens || 0) + (usage.total_tokens || 0),
-            };
+          clearInterval(heartbeat);
+
+          if (!response.ok) {
+            const status = response.status;
+            const body = await response.text();
+            console.error("AI error:", status, body);
+            const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
+            if (existing?.document_structure) {
+              await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析失败: AI返回错误 (${status})，可重新尝试详细解析` } as any).eq("id", analysisId);
+            } else {
+              await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `AI返回错误 (${status})` } as any).eq("id", analysisId);
+            }
+            sendEvent({ type: "error", message: `AI返回错误 (${status})` });
+            controller.close();
+            return;
           }
 
-          const updateData: any = {
-            scoring_table: result.scoring_table || [],
-            disqualification_items: result.disqualification_items || [],
-            trap_items: result.trap_items || [],
-            conflict_items: result.conflict_items || [],
-            technical_keywords: result.technical_keywords || [],
-            business_keywords: result.business_keywords || [],
-            responsibility_keywords: result.responsibility_keywords || [],
-            personnel_requirements: result.personnel_requirements || [],
-            summary: result.summary || "",
-            risk_score: result.risk_score ?? 50,
-            ai_status: "completed",
-            ai_progress: "解析完成",
-          };
-          if (tokenData) updateData.token_usage = tokenData;
-          if (result.bid_location) updateData.bid_location = result.bid_location;
-          if (result.requires_presentation !== undefined && result.requires_presentation !== null) updateData.requires_presentation = result.requires_presentation;
-          if (result.deposit_amount) updateData.deposit_amount = result.deposit_amount;
+          sendEvent({ type: "progress", message: "AI已返回结果，正在解析数据..." });
+          await supabase.from("bid_analyses").update({ ai_progress: "AI已返回结果，正在解析数据..." } as any).eq("id", analysisId);
 
-          if (result.bid_deadline) {
-            try {
-              const d = new Date(result.bid_deadline);
-              if (!isNaN(d.getTime())) {
-                updateData.bid_deadline = d.toISOString();
-              }
-            } catch (_) { /* skip */ }
-          }
+          const data = await response.json();
+          const usage = data.usage || null;
+          const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
 
-          const { error: updateErr } = await supabase.from("bid_analyses").update(updateData).eq("id", analysisId);
-          if (updateErr) {
-            console.error("DB update failed:", updateErr.message, "Retrying without optional fields...");
-            const coreUpdate: any = {
-              scoring_table: updateData.scoring_table,
-              disqualification_items: updateData.disqualification_items,
-              trap_items: updateData.trap_items,
-              conflict_items: updateData.conflict_items,
-              technical_keywords: updateData.technical_keywords,
-              business_keywords: updateData.business_keywords,
-              responsibility_keywords: updateData.responsibility_keywords,
-              personnel_requirements: updateData.personnel_requirements,
-              summary: updateData.summary,
-              risk_score: updateData.risk_score,
+          if (toolCall?.function?.arguments) {
+            const result = repairAndParseJson(toolCall.function.arguments);
+
+            let tokenData: any = null;
+            if (usage) {
+              const { data: existing } = await supabase.from("bid_analyses").select("token_usage").eq("id", analysisId).single();
+              const prev = (existing?.token_usage as any) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+              tokenData = {
+                prompt_tokens: (prev.prompt_tokens || 0) + (usage.prompt_tokens || 0),
+                completion_tokens: (prev.completion_tokens || 0) + (usage.completion_tokens || 0),
+                total_tokens: (prev.total_tokens || 0) + (usage.total_tokens || 0),
+              };
+            }
+
+            const updateData: any = {
+              scoring_table: result.scoring_table || [],
+              disqualification_items: result.disqualification_items || [],
+              trap_items: result.trap_items || [],
+              conflict_items: result.conflict_items || [],
+              technical_keywords: result.technical_keywords || [],
+              business_keywords: result.business_keywords || [],
+              responsibility_keywords: result.responsibility_keywords || [],
+              personnel_requirements: result.personnel_requirements || [],
+              summary: result.summary || "",
+              risk_score: result.risk_score ?? 50,
               ai_status: "completed",
+              ai_progress: "解析完成",
             };
-            if (tokenData) coreUpdate.token_usage = tokenData;
-            await supabase.from("bid_analyses").update(coreUpdate).eq("id", analysisId);
+            if (tokenData) updateData.token_usage = tokenData;
+            if (result.bid_location) updateData.bid_location = result.bid_location;
+            if (result.requires_presentation !== undefined && result.requires_presentation !== null) updateData.requires_presentation = result.requires_presentation;
+            if (result.deposit_amount) updateData.deposit_amount = result.deposit_amount;
+
+            if (result.bid_deadline) {
+              try {
+                const d = new Date(result.bid_deadline);
+                if (!isNaN(d.getTime())) {
+                  updateData.bid_deadline = d.toISOString();
+                }
+              } catch (_) { /* skip */ }
+            }
+
+            const { error: updateErr } = await supabase.from("bid_analyses").update(updateData).eq("id", analysisId);
+            if (updateErr) {
+              console.error("DB update failed:", updateErr.message, "Retrying without optional fields...");
+              const coreUpdate: any = {
+                scoring_table: updateData.scoring_table,
+                disqualification_items: updateData.disqualification_items,
+                trap_items: updateData.trap_items,
+                conflict_items: updateData.conflict_items,
+                technical_keywords: updateData.technical_keywords,
+                business_keywords: updateData.business_keywords,
+                responsibility_keywords: updateData.responsibility_keywords,
+                personnel_requirements: updateData.personnel_requirements,
+                summary: updateData.summary,
+                risk_score: updateData.risk_score,
+                ai_status: "completed",
+              };
+              if (tokenData) coreUpdate.token_usage = tokenData;
+              await supabase.from("bid_analyses").update(coreUpdate).eq("id", analysisId);
+            }
+            sendEvent({ type: "complete", status: "completed" });
+          } else {
+            const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
+            if (existing?.document_structure) {
+              await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: "详细解析失败: AI未返回有效数据，可重新尝试" } as any).eq("id", analysisId);
+            } else {
+              await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "AI未返回有效数据" } as any).eq("id", analysisId);
+            }
+            sendEvent({ type: "error", message: "AI未返回有效数据" });
           }
-        } else {
-          // No tool call result - if structure exists, preserve it
+        } catch (e) {
+          console.error("parse-bid stream error:", e);
           const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
           if (existing?.document_structure) {
-            await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: "详细解析失败: AI未返回有效数据，可重新尝试" } as any).eq("id", analysisId);
+            await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析出错: ${e instanceof Error ? e.message : "未知错误"}，可重新尝试` } as any).eq("id", analysisId);
           } else {
-            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "AI未返回有效数据" } as any).eq("id", analysisId);
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `解析出错: ${e instanceof Error ? e.message : "未知错误"}` } as any).eq("id", analysisId);
           }
+          sendEvent({ type: "error", message: e instanceof Error ? e.message : "未知错误" });
+        } finally {
+          controller.close();
         }
-      } catch (e) {
-        console.error("Background parse-bid error:", e);
-        // If structure exists, go back to structure_ready instead of failed
-        const { data: existing } = await supabase.from("bid_analyses").select("document_structure").eq("id", analysisId).single();
-        if (existing?.document_structure) {
-          await supabase.from("bid_analyses").update({ ai_status: "structure_ready", ai_progress: `详细解析出错: ${e instanceof Error ? e.message : "未知错误"}，可重新尝试` } as any).eq("id", analysisId);
-        } else {
-          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `解析出错: ${e instanceof Error ? e.message : "未知错误"}` } as any).eq("id", analysisId);
-        }
-      }
-    })();
+      },
+    });
 
-    // Use EdgeRuntime.waitUntil to keep the function alive after responding
-    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
-      (globalThis as any).EdgeRuntime.waitUntil(bgTask);
-    }
-
-    // Return immediately - client will poll DB for results
-    return new Response(JSON.stringify({ success: true, status: "processing" }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(stream, {
+      headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" },
     });
   } catch (e) {
     console.error("parse-bid error:", e);

@@ -94,6 +94,55 @@ export default function BidParser() {
   const [aiProgress, setAiProgress] = useState<string | null>(null);
   const tokenPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Helper: invoke edge function with SSE streaming, reading progress events
+  const invokeWithStreaming = async (
+    fnName: string,
+    body: any,
+    onProgress?: (msg: string) => void,
+  ): Promise<void> => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const session = (await supabase.auth.getSession()).data.session;
+    const resp = await fetch(`${supabaseUrl}/functions/v1/${fnName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session?.access_token || supabaseKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(errText || `HTTP ${resp.status}`);
+    }
+    // Read SSE stream
+    const reader = resp.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === "progress" && onProgress) {
+              onProgress(evt.message);
+            } else if (evt.type === "error") {
+              // Don't throw - let polling detect final status
+              if (onProgress) onProgress(evt.message);
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    }
+  };
+
   // Poll token_usage and status from DB during parsing
   const startTokenPolling = useCallback((analysisId: string, onComplete?: (analysis: any) => void) => {
     stopTokenPolling();
@@ -154,8 +203,8 @@ export default function BidParser() {
       submitter_name: profileMap[a.user_id] || "未知用户",
     }));
     
-    // Auto-detect timeout: if processing/analyzing_structure for >5 minutes, mark as timeout
-    const TIMEOUT_MS = 5 * 60 * 1000;
+    // Auto-detect timeout: if processing/analyzing_structure for >2 minutes, mark as timeout
+    const TIMEOUT_MS = 2 * 60 * 1000;
     const now = Date.now();
     for (const a of analyses) {
       if ((a.ai_status === "processing" || a.ai_status === "analyzing_structure") && 
@@ -220,18 +269,12 @@ export default function BidParser() {
               fetchAnalyses();
             }
           });
-          const { error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
-            body: {
-              analysisId: analysis.id,
-              projectName: name,
-              filePath: storagePath,
-              fileType: file.type || "",
-            },
-          });
-          if (structErr) {
-            stopTokenPolling();
-            throw structErr;
-          }
+          await invokeWithStreaming("parse-bid-structure", {
+            analysisId: analysis.id,
+            projectName: name,
+            filePath: storagePath,
+            fileType: file.type || "",
+          }, (msg) => setAiProgress(msg));
           lastAnalysis = analysis;
         } catch (err: any) {
           toast({ title: `${file.name} 结构分析失败`, description: err.message, variant: "destructive" });
@@ -279,17 +322,11 @@ export default function BidParser() {
             setAnalyzing(false);
           }
         });
-        const { error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
-          body: {
-            analysisId: analysis.id,
-            projectName: projectName || "未命名项目",
-            content: content.substring(0, 30000),
-          },
-        });
-        if (structErr) {
-          stopTokenPolling();
-          throw structErr;
-        }
+        await invokeWithStreaming("parse-bid-structure", {
+          analysisId: analysis.id,
+          projectName: projectName || "未命名项目",
+          content: content.substring(0, 30000),
+        }, (msg) => setAiProgress(msg));
         setContent("");
         setProjectName("");
         setShowForm(false);
@@ -349,11 +386,7 @@ export default function BidParser() {
         setDetailParsing(false);
       });
 
-      const { error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
-      if (fnErr) {
-        stopTokenPolling();
-        throw fnErr;
-      }
+      await invokeWithStreaming("parse-bid", body, (msg) => setAiProgress(msg));
       // Don't set detailParsing=false here - wait for polling callback
       return;
     } catch (err: any) {
@@ -414,11 +447,7 @@ export default function BidParser() {
         setReAnalyzing(false);
       });
 
-      const { error: structErr } = await supabase.functions.invoke("parse-bid-structure", { body });
-      if (structErr) {
-        stopTokenPolling();
-        throw structErr;
-      }
+      await invokeWithStreaming("parse-bid-structure", body, (msg) => setAiProgress(msg));
       // Don't set reAnalyzing=false here - wait for polling callback
       return;
     } catch (err: any) {

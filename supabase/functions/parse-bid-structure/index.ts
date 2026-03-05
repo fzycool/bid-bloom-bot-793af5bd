@@ -357,52 +357,72 @@ serve(async (req) => {
       requestBody.tool_choice = "auto";
     }
 
-    // Process AI call in background to avoid HTTP timeout
-    const bgTask = (async () => {
-      try {
-        const response = await fetch(aiUrl, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        });
+    // Use streaming response to keep HTTP connection alive during AI processing
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (data: any) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
 
-        if (!response.ok) {
-          const status = response.status;
-          const errText = await response.text();
-          console.error("AI gateway error:", status, errText);
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-          return;
+        try {
+          sendEvent({ type: "progress", message: "正在调用AI模型分析文档结构..." });
+
+          // Set up heartbeat to keep connection alive
+          const heartbeat = setInterval(() => {
+            sendEvent({ type: "heartbeat" });
+          }, 15000);
+
+          const response = await fetch(aiUrl, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          });
+
+          clearInterval(heartbeat);
+
+          if (!response.ok) {
+            const status = response.status;
+            const errText = await response.text();
+            console.error("AI gateway error:", status, errText);
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `AI返回错误 (${status})` } as any).eq("id", analysisId);
+            sendEvent({ type: "error", message: `AI返回错误 (${status})` });
+            controller.close();
+            return;
+          }
+
+          sendEvent({ type: "progress", message: "AI已返回结果，正在解析结构数据..." });
+
+          const data = await response.json();
+          const usage = data.usage || null;
+          const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+
+          if (toolCall?.function?.arguments) {
+            const result = repairAndParseJson(toolCall.function.arguments);
+            const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
+            await supabase.from("bid_analyses").update({
+              document_structure: result,
+              ai_status: "structure_ready",
+              ai_progress: "结构分析完成",
+              token_usage: tokenData,
+            } as any).eq("id", analysisId);
+            sendEvent({ type: "complete", status: "structure_ready" });
+          } else {
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "AI未返回有效结构数据" } as any).eq("id", analysisId);
+            sendEvent({ type: "error", message: "AI未返回有效结构数据" });
+          }
+        } catch (e) {
+          console.error("parse-bid-structure stream error:", e);
+          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `结构分析出错: ${e instanceof Error ? e.message : "未知错误"}` } as any).eq("id", analysisId);
+          sendEvent({ type: "error", message: e instanceof Error ? e.message : "未知错误" });
+        } finally {
+          controller.close();
         }
+      },
+    });
 
-        const data = await response.json();
-        const usage = data.usage || null;
-        const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-
-        if (toolCall?.function?.arguments) {
-          const result = repairAndParseJson(toolCall.function.arguments);
-          const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
-          await supabase.from("bid_analyses").update({
-            document_structure: result,
-            ai_status: "structure_ready",
-            token_usage: tokenData,
-          }).eq("id", analysisId);
-        } else {
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-        }
-      } catch (e) {
-        console.error("Background parse-bid-structure error:", e);
-        await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-      }
-    })();
-
-    // Use EdgeRuntime.waitUntil to keep the function alive after responding
-    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
-      (globalThis as any).EdgeRuntime.waitUntil(bgTask);
-    }
-
-    // Return immediately - client will poll DB for results
-    return new Response(JSON.stringify({ success: true, status: "analyzing_structure" }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    return new Response(stream, {
+      headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" },
     });
   } catch (e) {
     console.error("parse-bid-structure error:", e);
