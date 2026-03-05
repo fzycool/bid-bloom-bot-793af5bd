@@ -93,13 +93,13 @@ export default function BidParser() {
   const [tokenUsage, setTokenUsage] = useState<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null>(null);
   const tokenPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Poll token_usage from DB during parsing
-  const startTokenPolling = useCallback((analysisId: string) => {
+  // Poll token_usage and status from DB during parsing
+  const startTokenPolling = useCallback((analysisId: string, onComplete?: (analysis: any) => void) => {
     stopTokenPolling();
     tokenPollRef.current = setInterval(async () => {
       const { data } = await supabase
         .from("bid_analyses")
-        .select("token_usage, ai_status")
+        .select("*")
         .eq("id", analysisId)
         .single();
       if (data?.token_usage) {
@@ -109,8 +109,9 @@ export default function BidParser() {
       // Stop polling when parsing is done
       if (data && !["analyzing_structure", "processing"].includes(data.ai_status)) {
         stopTokenPolling();
+        if (onComplete) onComplete(data);
       }
-    }, 2000);
+    }, 3000);
   }, []);
 
   const stopTokenPolling = useCallback(() => {
@@ -208,9 +209,14 @@ export default function BidParser() {
 
         try {
           setTokenUsage(null);
-          startTokenPolling(analysis.id);
-          // Step 1: Analyze structure first
-          const { data: respData, error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
+          // Start polling - will detect when structure analysis completes
+          startTokenPolling(analysis.id, (completed) => {
+            if (completed.ai_status === "structure_ready") {
+              setSelectedAnalysis(completed as unknown as BidAnalysis);
+              fetchAnalyses();
+            }
+          });
+          const { error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
             body: {
               analysisId: analysis.id,
               projectName: name,
@@ -218,9 +224,10 @@ export default function BidParser() {
               fileType: file.type || "",
             },
           });
-          if (structErr) throw structErr;
-          stopTokenPolling();
-          if (respData?.usage) setTokenUsage(respData.usage);
+          if (structErr) {
+            stopTokenPolling();
+            throw structErr;
+          }
           lastAnalysis = analysis;
         } catch (err: any) {
           toast({ title: `${file.name} 结构分析失败`, description: err.message, variant: "destructive" });
@@ -257,31 +264,33 @@ export default function BidParser() {
 
       try {
         setTokenUsage(null);
-        startTokenPolling(analysis.id);
-        // Step 1: Analyze structure first
-        const { data: respData, error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
+        startTokenPolling(analysis.id, (completed) => {
+          if (completed.ai_status === "structure_ready") {
+            setSelectedAnalysis(completed as unknown as BidAnalysis);
+            toast({ title: "结构分析完成", description: "请查看文档结构后进行详细解析" });
+            fetchAnalyses();
+            setAnalyzing(false);
+          } else if (completed.ai_status === "failed") {
+            toast({ title: "结构分析失败", variant: "destructive" });
+            setAnalyzing(false);
+          }
+        });
+        const { error: structErr } = await supabase.functions.invoke("parse-bid-structure", {
           body: {
             analysisId: analysis.id,
             projectName: projectName || "未命名项目",
             content: content.substring(0, 30000),
           },
         });
-        if (structErr) throw structErr;
-        stopTokenPolling();
-        if (respData?.usage) setTokenUsage(respData.usage);
-
-        toast({ title: "结构分析完成", description: "请查看文档结构后进行详细解析" });
+        if (structErr) {
+          stopTokenPolling();
+          throw structErr;
+        }
         setContent("");
         setProjectName("");
         setShowForm(false);
-        await fetchAnalyses();
-
-        const { data: updated } = await supabase
-          .from("bid_analyses")
-          .select("*")
-          .eq("id", analysis.id)
-          .single();
-        if (updated) setSelectedAnalysis(updated as unknown as BidAnalysis);
+        // Don't set analyzing=false here - wait for polling callback
+        return;
       } catch (err: any) {
         toast({ title: "结构分析失败", description: err.message, variant: "destructive" });
       }
@@ -293,7 +302,6 @@ export default function BidParser() {
   const handleDetailParse = async () => {
     if (!selectedAnalysis || !user) return;
     setDetailParsing(true);
-    // Keep existing tokenUsage (from structure step) to accumulate
 
     try {
       const body: any = {
@@ -315,49 +323,25 @@ export default function BidParser() {
 
       await supabase.from("bid_analyses").update({ ai_status: "processing" } as any).eq("id", selectedAnalysis.id);
       setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "processing" } : prev);
-      startTokenPolling(selectedAnalysis.id);
-
-      const { data: respData, error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
-      stopTokenPolling();
-      if (fnErr) throw fnErr;
-      if (respData?.usage) setTokenUsage((prev) => ({
-        prompt_tokens: (prev?.prompt_tokens || 0) + (respData.usage.prompt_tokens || 0),
-        completion_tokens: (prev?.completion_tokens || 0) + (respData.usage.completion_tokens || 0),
-        total_tokens: (prev?.total_tokens || 0) + (respData.usage.total_tokens || 0),
-      }));
-
-      toast({ title: "详细解析完成" });
-
-      // If edge function returned parsed result, use it to update local state immediately
-      if (respData?.result) {
-        setSelectedAnalysis((prev) => prev ? {
-          ...prev,
-          ai_status: "completed",
-          scoring_table: respData.result.scoring_table || [],
-          disqualification_items: respData.result.disqualification_items || [],
-          trap_items: respData.result.trap_items || [],
-          conflict_items: respData.result.conflict_items || [],
-          technical_keywords: respData.result.technical_keywords || [],
-          business_keywords: respData.result.business_keywords || [],
-          responsibility_keywords: respData.result.responsibility_keywords || [],
-          personnel_requirements: respData.result.personnel_requirements || [],
-          summary: respData.result.summary || "",
-          risk_score: respData.result.risk_score ?? 50,
-          bid_deadline: respData.result.bid_deadline || prev.bid_deadline,
-          bid_location: respData.result.bid_location || prev.bid_location,
-          requires_presentation: respData.result.requires_presentation ?? prev.requires_presentation,
-          deposit_amount: respData.result.deposit_amount || prev.deposit_amount,
-        } : prev);
-      } else {
-        // Fallback: force completed status
-        setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "completed" } : prev);
-      }
-
-      // Also refresh from DB in background
-      fetchAnalyses().then(async () => {
-        const { data: updated } = await supabase.from("bid_analyses").select("*").eq("id", selectedAnalysis.id).single();
-        if (updated) setSelectedAnalysis(updated as unknown as BidAnalysis);
+      
+      startTokenPolling(selectedAnalysis.id, (completed) => {
+        if (completed.ai_status === "completed") {
+          setSelectedAnalysis(completed as unknown as BidAnalysis);
+          toast({ title: "详细解析完成" });
+          fetchAnalyses();
+        } else if (completed.ai_status === "failed") {
+          toast({ title: "详细解析失败", variant: "destructive" });
+        }
+        setDetailParsing(false);
       });
+
+      const { error: fnErr } = await supabase.functions.invoke("parse-bid", { body });
+      if (fnErr) {
+        stopTokenPolling();
+        throw fnErr;
+      }
+      // Don't set detailParsing=false here - wait for polling callback
+      return;
     } catch (err: any) {
       toast({ title: "详细解析失败", description: err.message, variant: "destructive" });
       await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);
@@ -381,7 +365,6 @@ export default function BidParser() {
 
     await supabase.from("bid_analyses").update({ ai_status: "analyzing_structure", custom_prompt: newPrompt, token_usage: null } as any).eq("id", selectedAnalysis.id);
     setSelectedAnalysis((prev) => prev ? { ...prev, ai_status: "analyzing_structure", custom_prompt: newPrompt } : prev);
-    startTokenPolling(selectedAnalysis.id);
 
     try {
       const body: any = {
@@ -399,16 +382,24 @@ export default function BidParser() {
         }
       }
 
-      // Step 1: Re-analyze structure
-      const { data: respData, error: structErr } = await supabase.functions.invoke("parse-bid-structure", { body });
-      stopTokenPolling();
-      if (structErr) throw structErr;
-      if (respData?.usage) setTokenUsage(respData.usage);
+      startTokenPolling(selectedAnalysis.id, (completed) => {
+        if (completed.ai_status === "structure_ready") {
+          setSelectedAnalysis(completed as unknown as BidAnalysis);
+          toast({ title: "结构重新分析完成", description: "请查看后进行详细解析" });
+          fetchAnalyses();
+        } else if (completed.ai_status === "failed") {
+          toast({ title: "解析失败", variant: "destructive" });
+        }
+        setReAnalyzing(false);
+      });
 
-      toast({ title: "结构重新分析完成", description: "请查看后进行详细解析" });
-      await fetchAnalyses();
-      const { data: updated } = await supabase.from("bid_analyses").select("*").eq("id", selectedAnalysis.id).single();
-      if (updated) setSelectedAnalysis(updated as unknown as BidAnalysis);
+      const { error: structErr } = await supabase.functions.invoke("parse-bid-structure", { body });
+      if (structErr) {
+        stopTokenPolling();
+        throw structErr;
+      }
+      // Don't set reAnalyzing=false here - wait for polling callback
+      return;
     } catch (err: any) {
       toast({ title: "解析失败", description: err.message, variant: "destructive" });
       await supabase.from("bid_analyses").update({ ai_status: "failed" } as any).eq("id", selectedAnalysis.id);

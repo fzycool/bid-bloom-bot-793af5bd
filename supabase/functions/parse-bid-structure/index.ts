@@ -218,12 +218,11 @@ serve(async (req) => {
 
     const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
     const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
-    const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
+    const aiModel = modelConfig?.model_name || "google/gemini-2.5-flash";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
     const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
 
-    // 清理工具 schema 中第三方不兼容的字段
     function sanitizeTools(tools: any[]) {
       if (isLovable) return tools;
       return JSON.parse(JSON.stringify(tools), (key, value) => {
@@ -265,7 +264,6 @@ serve(async (req) => {
         });
       } else if (isPdf) {
         if (isLovable) {
-          // Lovable AI supports file uploads
           const uint8Array = new Uint8Array(arrayBuffer);
           const b64 = base64Encode(uint8Array);
           const fileName = filePath.split("/").pop() || "document.pdf";
@@ -277,13 +275,11 @@ serve(async (req) => {
             ],
           });
         } else {
-          // Third-party providers: extract text from PDF bytes
           const uint8Array = new Uint8Array(arrayBuffer);
           let textContent = "";
           try {
             const decoder = new TextDecoder("utf-8", { fatal: false });
             const raw = decoder.decode(uint8Array);
-            // Simple PDF text extraction: pull text between BT/ET or parentheses
             const textParts: string[] = [];
             const regex = /\(([^)]{1,500})\)/g;
             let m;
@@ -295,11 +291,8 @@ serve(async (req) => {
           } catch (_) { /* ignore */ }
           
           if (!textContent || textContent.length < 200) {
-            // Fallback: send raw bytes description  
             textContent = "[PDF文件无法直接提取文本。请根据文件名和项目名称进行结构分析。]";
-            console.warn("PDF text extraction yielded insufficient text, sending minimal prompt");
           }
-          
           const MAX_CHARS = 80000;
           if (textContent.length > MAX_CHARS) {
             textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
@@ -310,10 +303,8 @@ serve(async (req) => {
           });
         }
       } else {
-        // DOCX or old DOC: extract text content
         let textContent = "";
         if (isOldDocFormat(arrayBuffer)) {
-          // Old .doc format (OLE2/CFB)
           try {
             textContent = await extractTextFromOldDoc(arrayBuffer);
           } catch (docErr: any) {
@@ -322,7 +313,6 @@ serve(async (req) => {
             throw new Error("无法从.doc文件中提取内容，请尝试用Word另存为.docx或PDF后重新上传");
           }
         } else {
-          // DOCX format
           try {
             textContent = extractTextFromDocx(arrayBuffer);
           } catch (docxErr: any) {
@@ -337,10 +327,8 @@ serve(async (req) => {
           await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
           throw new Error("无法从文档中提取文本内容，请尝试转换为PDF后重新上传");
         }
-        // Truncate to avoid timeout - structure analysis only needs overview
         const MAX_CHARS = 80000;
         if (textContent.length > MAX_CHARS) {
-          console.log(`Text truncated from ${textContent.length} to ${MAX_CHARS} chars for structure analysis`);
           textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
         }
         messages.push({
@@ -369,44 +357,52 @@ serve(async (req) => {
       requestBody.tool_choice = "auto";
     }
 
-    const response = await fetch(aiUrl, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-    });
+    // Process AI call in background to avoid HTTP timeout
+    const bgTask = (async () => {
+      try {
+        const response = await fetch(aiUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
 
-    if (!response.ok) {
-      const status = response.status;
-      await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-      const errText = await response.text();
-      console.error("AI gateway error detail:", status, errText);
-      if (status === 429) return new Response(JSON.stringify({ error: "AI服务请求过于频繁，请稍后重试" }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      if (status === 402) return new Response(JSON.stringify({ error: "AI服务额度不足" }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      throw new Error(`AI gateway error: ${status} - ${errText.slice(0, 500)}`);
+        if (!response.ok) {
+          const status = response.status;
+          const errText = await response.text();
+          console.error("AI gateway error:", status, errText);
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          return;
+        }
+
+        const data = await response.json();
+        const usage = data.usage || null;
+        const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+
+        if (toolCall?.function?.arguments) {
+          const result = repairAndParseJson(toolCall.function.arguments);
+          const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
+          await supabase.from("bid_analyses").update({
+            document_structure: result,
+            ai_status: "structure_ready",
+            token_usage: tokenData,
+          }).eq("id", analysisId);
+        } else {
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+        }
+      } catch (e) {
+        console.error("Background parse-bid-structure error:", e);
+        await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+      }
+    })();
+
+    // Use EdgeRuntime.waitUntil to keep the function alive after responding
+    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
+      (globalThis as any).EdgeRuntime.waitUntil(bgTask);
     }
 
-    const data = await response.json();
-    const usage = data.usage || null;
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-
-    if (toolCall?.function?.arguments) {
-      const result = repairAndParseJson(toolCall.function.arguments);
-
-      const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
-      await supabase.from("bid_analyses").update({
-        document_structure: result,
-        ai_status: "structure_ready",
-        token_usage: tokenData,
-      }).eq("id", analysisId);
-
-      return new Response(JSON.stringify({ success: true, structure: result, usage }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-    return new Response(JSON.stringify({ error: "AI未返回有效结果" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Return immediately - client will poll DB for results
+    return new Response(JSON.stringify({ success: true, status: "analyzing_structure" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("parse-bid-structure error:", e);
