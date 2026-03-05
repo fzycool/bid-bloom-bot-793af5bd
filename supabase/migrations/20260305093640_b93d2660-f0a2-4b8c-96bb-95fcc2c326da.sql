@@ -1,0 +1,1 @@
+ALTER TABLE public.company_materials ADD COLUMN bid_analysis_id uuid REFERENCES public.bid_analyses(id) ON DELETE SET NULL DEFAULT NULL;
