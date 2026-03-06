@@ -43,6 +43,14 @@ const baseModules = [
 const Dashboard = () => {
   const { user, isApproved, isAdmin, signOut } = useAuth();
   const [activeModule, setActiveModule] = useState("overview");
+  const [overviewKey, setOverviewKey] = useState(0);
+
+  const handleModuleChange = (id: string) => {
+    setActiveModule(id);
+    if (id === "overview") {
+      setOverviewKey((k) => k + 1);
+    }
+  };
 
   const modules = [
     ...baseModules,
