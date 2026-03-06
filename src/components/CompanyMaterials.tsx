@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Briefcase,
   Trash2,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +26,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import MaterialGrid from "./company-materials/MaterialGrid";
+import MaterialExtractor from "./MaterialExtractor";
 
 interface ProjectGroup {
   id: string | null; // null = 通用材料
@@ -39,6 +41,7 @@ export default function CompanyMaterials() {
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<ProjectGroup | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [extractorOpen, setExtractorOpen] = useState(false);
 
   const fetchProjects = useCallback(async () => {
     if (!user) return;
@@ -147,14 +150,20 @@ export default function CompanyMaterials() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
-          <Building2 className="w-6 h-6 text-accent" />
-          公司材料库
-        </h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          按招标项目分类管理公司资质证书、营业执照等材料
-        </p>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <Building2 className="w-6 h-6 text-accent" />
+            公司材料库
+          </h2>
+          <p className="text-muted-foreground text-sm mt-1">
+            按招标项目分类管理公司资质证书、营业执照等材料
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => setExtractorOpen(true)} className="gap-2">
+          <FileText className="w-4 h-4" />
+          材料提取
+        </Button>
       </div>
 
       {/* Project List */}
@@ -238,6 +247,8 @@ export default function CompanyMaterials() {
           })}
         </div>
       )}
+
+      <MaterialExtractor open={extractorOpen} onOpenChange={setExtractorOpen} onComplete={fetchProjects} />
     </div>
   );
 }
