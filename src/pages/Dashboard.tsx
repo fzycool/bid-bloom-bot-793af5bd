@@ -43,6 +43,14 @@ const baseModules = [
 const Dashboard = () => {
   const { user, isApproved, isAdmin, signOut } = useAuth();
   const [activeModule, setActiveModule] = useState("overview");
+  const [overviewKey, setOverviewKey] = useState(0);
+
+  const handleModuleChange = (id: string) => {
+    setActiveModule(id);
+    if (id === "overview") {
+      setOverviewKey((k) => k + 1);
+    }
+  };
 
   const modules = [
     ...baseModules,
@@ -93,7 +101,7 @@ const Dashboard = () => {
             {modules.map((m) => (
               <button
                 key={m.id}
-                onClick={() => setActiveModule(m.id)}
+                onClick={() => handleModuleChange(m.id)}
                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   activeModule === m.id
                     ? "bg-accent text-accent-foreground"
@@ -117,7 +125,7 @@ const Dashboard = () => {
           {modules.map((m) => (
             <button
               key={m.id}
-              onClick={() => setActiveModule(m.id)}
+              onClick={() => handleModuleChange(m.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
                 activeModule === m.id
                   ? "bg-accent text-accent-foreground"
@@ -132,7 +140,7 @@ const Dashboard = () => {
 
         {/* Main content */}
         <main className="flex-1 min-h-0 overflow-auto p-6 md:p-8">
-          {activeModule === "overview" && <DashboardOverview />}
+          {activeModule === "overview" && <DashboardOverview key={overviewKey} />}
           {activeModule === "knowledge" && <KnowledgeBase />}
           {activeModule === "parse" && <BidParser />}
           {activeModule === "compare" && <BidComparison />}
