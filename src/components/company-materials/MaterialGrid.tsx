@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import MaterialExtractor from "../MaterialExtractor";
+
 
 interface CompanyMaterial {
   id: string;
@@ -72,7 +72,7 @@ export default function MaterialGrid({ projectId, projectName, onBack }: Materia
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
-  const [extractorOpen, setExtractorOpen] = useState(false);
+  
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -291,12 +291,6 @@ export default function MaterialGrid({ projectId, projectName, onBack }: Materia
                   批量删除
                 </Button>
               )}
-              {!projectId && (
-                <Button variant="outline" onClick={() => setExtractorOpen(true)} className="gap-2">
-                  <FileText className="w-4 h-4" />
-                  材料提取
-                </Button>
-              )}
               <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="gap-2">
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 上传图片
@@ -421,11 +415,6 @@ export default function MaterialGrid({ projectId, projectName, onBack }: Materia
           )}
         </DialogContent>
       </Dialog>
-
-      {/* Material Extractor - only for general materials */}
-      {!projectId && (
-        <MaterialExtractor open={extractorOpen} onOpenChange={setExtractorOpen} onComplete={fetchMaterials} />
-      )}
     </div>
   );
 }
