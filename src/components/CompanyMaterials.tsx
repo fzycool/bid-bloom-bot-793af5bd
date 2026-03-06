@@ -119,7 +119,9 @@ export default function CompanyMaterials() {
         await supabase.storage.from("company-materials").remove(mats.map(m => m.file_path));
         await supabase.from("company_materials").delete().eq("bid_analysis_id", project.id);
       }
-      toast({ title: `已删除「${project.name}」的所有材料` });
+      // Delete the bid_analysis record (project card)
+      await supabase.from("bid_analyses").delete().eq("id", project.id);
+      toast({ title: `已删除项目「${project.name}」及其所有材料` });
       fetchProjects();
     } catch (err: any) {
       toast({ title: "删除失败", description: err.message, variant: "destructive" });
