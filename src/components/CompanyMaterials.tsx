@@ -9,7 +9,21 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Briefcase,
+  Trash2,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import MaterialGrid from "./company-materials/MaterialGrid";
 
 interface ProjectGroup {
@@ -20,9 +34,11 @@ interface ProjectGroup {
 
 export default function CompanyMaterials() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [projects, setProjects] = useState<ProjectGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<ProjectGroup | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchProjects = useCallback(async () => {
     if (!user) return;
@@ -90,6 +106,28 @@ export default function CompanyMaterials() {
     fetchProjects();
   }, [fetchProjects]);
 
+  const handleDeleteProject = async (project: ProjectGroup) => {
+    if (!project.id) return;
+    setDeletingId(project.id);
+    try {
+      // Delete materials' storage files first
+      const { data: mats } = await supabase
+        .from("company_materials")
+        .select("file_path")
+        .eq("bid_analysis_id", project.id);
+      if (mats && mats.length > 0) {
+        await supabase.storage.from("company-materials").remove(mats.map(m => m.file_path));
+        await supabase.from("company_materials").delete().eq("bid_analysis_id", project.id);
+      }
+      toast({ title: `已删除「${project.name}」的所有材料` });
+      fetchProjects();
+    } catch (err: any) {
+      toast({ title: "删除失败", description: err.message, variant: "destructive" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // If a project is selected, show its materials
   if (selectedProject) {
     return (
@@ -156,6 +194,41 @@ export default function CompanyMaterials() {
                         </Badge>
                       </div>
                     </div>
+                    {!isGeneral && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {deletingId === project.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>确认删除</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              将删除「{project.name}」下的所有 {project.materialCount} 个材料，此操作不可恢复。
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>取消</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={(e) => { e.stopPropagation(); handleDeleteProject(project); }}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              删除
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
                   </div>
                 </CardContent>
               </Card>
