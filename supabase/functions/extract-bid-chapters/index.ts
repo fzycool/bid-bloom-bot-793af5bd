@@ -14,6 +14,8 @@ interface Chapter {
   content?: string;
 }
 
+// ─── Text search helpers ──────────────────────────────────────────
+
 function findAllOccurrences(text: string, pattern: string): number[] {
   const positions: number[] = [];
   let start = 0;
@@ -26,14 +28,12 @@ function findAllOccurrences(text: string, pattern: string): number[] {
   return positions;
 }
 
-/** Find positions where pattern appears at the start of a line */
 function findLineStartOccurrences(text: string, pattern: string): number[] {
   const positions: number[] = [];
   let start = 0;
   while (start < text.length) {
     const idx = text.indexOf(pattern, start);
     if (idx < 0) break;
-    // Must be at position 0 or preceded by \n
     if (idx === 0 || text[idx - 1] === "\n") {
       positions.push(idx);
     }
@@ -42,21 +42,181 @@ function findLineStartOccurrences(text: string, pattern: string): number[] {
   return positions;
 }
 
-function splitTextByChapters(
-  fullText: string,
-  chapters: Chapter[]
-): Chapter[] {
+// ─── Pre-processing: extract TOC from text directly ───────────────
+
+function extractTocFromText(fullText: string): Chapter[] {
+  const chapters: Chapter[] = [];
+
+  // Find Word-style TOC region (look for "目录" followed by structured entries)
+  const tocIdx = fullText.indexOf("目录");
+  if (tocIdx < 0) return chapters;
+
+  // Get text after "目录" (up to 10K chars or until we hit clear content)
+  const tocRegion = fullText.substring(tocIdx, Math.min(tocIdx + 15000, fullText.length));
+  const lines = tocRegion.split("\n").slice(1); // skip the "目录" line itself
+
+  // Patterns for TOC entries
+  const tocPatterns = [
+    // "第一章 标题" or "第1章 标题"
+    /^(第[一二三四五六七八九十百千\d]+[章部分节篇])\s*[.、\s]*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+    // "1.1. 标题" or "1.1 标题"
+    /^(\d+(?:\.\d+)*\.?)\s+(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+    // "（一）标题" or "(1) 标题"
+    /^([（(][一二三四五六七八九十\d]+[）)])\s*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+    // "附录A 标题" or "附件1 标题"
+    /^(附[录件表]\s*[A-Za-z\d]*)\s*[.、\s]*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+  ];
+
+  let emptyLineCount = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      emptyLineCount++;
+      if (emptyLineCount > 3) break; // End of TOC region
+      continue;
+    }
+
+    // Skip PAGEREF/TOC field codes
+    if (/^\\[lfh]$|^TOC\s|^PAGEREF/.test(trimmed)) continue;
+    // Skip pure page numbers
+    if (/^\d+$/.test(trimmed)) continue;
+
+    emptyLineCount = 0;
+    let matched = false;
+
+    for (const pattern of tocPatterns) {
+      const m = trimmed.match(pattern);
+      if (m) {
+        const sectionNum = m[1].replace(/\.$/, "").trim();
+        const title = m[2].trim()
+          .replace(/\s*PAGEREF\s.*$/, "")
+          .replace(/\s*\\h\s*$/, "")
+          .replace(/\t.*$/, "")
+          .trim();
+
+        if (title.length < 1 || title.length > 80) continue;
+
+        const level = inferLevel(sectionNum);
+        chapters.push({ section_number: sectionNum, title, level });
+        matched = true;
+        break;
+      }
+    }
+
+    // If we've collected entries but hit a non-matching line, we might be past the TOC
+    if (!matched && chapters.length > 5) {
+      // Check if this looks like content rather than TOC
+      if (trimmed.length > 100) break;
+    }
+  }
+
+  return chapters;
+}
+
+function inferLevel(sectionNum: string): number {
+  // "第X章", "第X部分" → level 1
+  if (/^第.+[章部分篇]$/.test(sectionNum)) return 1;
+  // "第X节" → level 2
+  if (/^第.+节$/.test(sectionNum)) return 2;
+  // Numbered: count dots
+  const dotMatch = sectionNum.match(/^(\d+)(\.(\d+))?(\.(\d+))?(\.(\d+))?/);
+  if (dotMatch) {
+    if (dotMatch[7]) return 4;
+    if (dotMatch[5]) return 3;
+    if (dotMatch[3]) return 2;
+    return 1;
+  }
+  // （一）→ level 2, （1）→ level 3
+  if (/^[（(][一二三四五六七八九十]+[）)]$/.test(sectionNum)) return 2;
+  if (/^[（(]\d+[）)]$/.test(sectionNum)) return 3;
+  // 附录/附件 → level 1
+  if (/^附/.test(sectionNum)) return 1;
+  return 1;
+}
+
+// ─── JSON repair for truncated AI output ──────────────────────────
+
+function repairAndParseJson(raw: string): any {
+  // Clean markdown
+  let cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+
+  // Find JSON start
+  const jsonStart = cleaned.search(/[\[{]/);
+  if (jsonStart < 0) throw new Error("No JSON found");
+  cleaned = cleaned.substring(jsonStart);
+
+  // Try direct parse
+  try { return JSON.parse(cleaned); } catch { /* continue */ }
+
+  // Remove trailing commas
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
+
+  // Try again
+  try { return JSON.parse(cleaned); } catch { /* continue */ }
+
+  // Force-close open brackets
+  let open = 0, close = 0;
+  for (const c of cleaned) {
+    if (c === "{" || c === "[") open++;
+    if (c === "}" || c === "]") close++;
+  }
+
+  // Remove trailing incomplete property (e.g., `"title": "some` without closing)
+  cleaned = cleaned.replace(/,\s*\{[^}]*$/, "");
+  cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
+
+  // Re-count and close
+  open = 0; close = 0;
+  const stack: string[] = [];
+  for (const c of cleaned) {
+    if (c === "{") stack.push("}");
+    if (c === "[") stack.push("]");
+    if (c === "}" || c === "]") stack.pop();
+  }
+  cleaned += stack.reverse().join("");
+
+  try { return JSON.parse(cleaned); } catch (e) {
+    // Last resort: find last valid closing bracket for the outermost structure
+    const firstChar = cleaned[0];
+    const endChar = firstChar === "[" ? "]" : "}";
+    const lastEnd = cleaned.lastIndexOf(endChar);
+    if (lastEnd > 0) {
+      try { return JSON.parse(cleaned.substring(0, lastEnd + 1)); } catch { /* give up */ }
+    }
+    throw e;
+  }
+}
+
+// ─── Smart text selection for AI ──────────────────────────────────
+
+function selectTextForAI(fullText: string, maxLen: number): string {
+  if (fullText.length <= maxLen) return fullText;
+
+  // Try to find TOC region and include it plus content after
+  const tocIdx = fullText.indexOf("目录");
+  if (tocIdx >= 0 && tocIdx < fullText.length / 2) {
+    // Include some context before TOC + everything after
+    const start = Math.max(0, tocIdx - 2000);
+    const selected = fullText.substring(start, start + maxLen);
+    if (selected.length > maxLen * 0.5) return selected;
+  }
+
+  // Fallback: first maxLen chars
+  return fullText.substring(0, maxLen);
+}
+
+// ─── Chapter-to-text mapping ─────────────────────────────────────
+
+function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
   if (!chapters.length) return [];
 
-  // For each chapter, find ALL occurrences of its title patterns
   const chapterCandidates = chapters.map((ch) => {
-    // Full patterns: section_number + separator + title
-    const seps = [" ", "  ", "\t", "、", ".", " "];
+    const seps = [" ", "  ", "\t", "、", ".", " ", ""];
     const fullPatterns: string[] = [];
     for (const sep of seps) {
       fullPatterns.push(`${ch.section_number}${sep}${ch.title}`);
     }
-    // Also try section_number\ntitle (heading on next line)
     fullPatterns.push(`${ch.section_number}\n${ch.title}`);
 
     const fullPositions: number[] = [];
@@ -64,8 +224,6 @@ function splitTextByChapters(
       fullPositions.push(...findAllOccurrences(fullText, p));
     }
 
-    // Title-only positions: MUST be at start of line to avoid false matches
-    // within body text like "身份证明或授权委托书"
     const titleLineStartPositions: number[] = [];
     if (ch.title.length >= 3) {
       titleLineStartPositions.push(...findLineStartOccurrences(fullText, ch.title));
@@ -89,63 +247,42 @@ function splitTextByChapters(
     const avgGap =
       (firstPositions[firstPositions.length - 1] - firstPositions[0]) /
       (firstPositions.length - 1);
-    console.log("TOC detection: avgGap =", avgGap, "firstPositions count =", firstPositions.length);
     if (avgGap < 200) {
       tocEnd = firstPositions[firstPositions.length - 1] + 50;
       console.log("TOC detected, tocEnd =", tocEnd);
     }
   }
 
-  // Pick positions sequentially, preferring ones AFTER tocEnd
   let minPos = tocEnd;
   const located: Array<Chapter & { position: number }> = [];
 
   for (const ch of chapterCandidates) {
     let chosen = -1;
 
-    // 1. Try full pattern (section_number + title) after minPos — strongest signal
     for (const pos of ch.candidates) {
-      if (pos >= minPos) {
-        chosen = pos;
-        break;
-      }
+      if (pos >= minPos) { chosen = pos; break; }
     }
 
-    // 2. If not found, try title at line-start after minPos
     if (chosen < 0) {
       for (const pos of ch.titleCandidates) {
-        if (pos >= minPos) {
-          chosen = pos;
-          break;
-        }
+        if (pos >= minPos) { chosen = pos; break; }
       }
     }
 
-    // 3. Last fallback: title at line-start after tocEnd
     if (chosen < 0 && tocEnd > 0) {
       for (const pos of ch.titleCandidates) {
-        if (pos >= tocEnd) {
-          chosen = pos;
-          break;
-        }
+        if (pos >= tocEnd) { chosen = pos; break; }
       }
     }
 
     if (chosen >= 0) {
-      console.log(`  matched "${ch.section_number} ${ch.title}" at pos=${chosen}, content_preview="${fullText.substring(chosen, chosen + 60).replace(/\n/g, "\\n")}"`);
-      located.push({
-        section_number: ch.section_number,
-        title: ch.title,
-        level: ch.level,
-        position: chosen,
-      });
+      located.push({ section_number: ch.section_number, title: ch.title, level: ch.level, position: chosen });
       minPos = chosen + 1;
     } else {
-      console.log(`  SKIPPED "${ch.section_number} ${ch.title}" — no valid position found`);
+      console.log(`  SKIPPED "${ch.section_number} ${ch.title}" — no position found`);
     }
   }
 
-  // Sort by position and deduplicate
   located.sort((a, b) => a.position - b.position);
   const unique: typeof located = [];
   for (const ch of located) {
@@ -156,8 +293,7 @@ function splitTextByChapters(
 
   return unique.map((ch, i) => {
     const start = ch.position;
-    const end =
-      i + 1 < unique.length ? unique[i + 1].position : fullText.length;
+    const end = i + 1 < unique.length ? unique[i + 1].position : fullText.length;
     return {
       section_number: ch.section_number,
       title: ch.title,
@@ -169,6 +305,94 @@ function splitTextByChapters(
   });
 }
 
+// ─── AI call helper ──────────────────────────────────────────────
+
+async function callAI(
+  apiKey: string,
+  baseUrl: string,
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  tools: any[] | null,
+  maxTokens: number,
+): Promise<Chapter[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+
+  const body: any = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+    max_tokens: maxTokens,
+    temperature: 0.1,
+  };
+
+  if (tools) {
+    body.tools = tools;
+    body.tool_choice = { type: "function", function: { name: "extract_chapters" } };
+  }
+
+  const resp = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  });
+  clearTimeout(timer);
+
+  console.log(`AI [${model}] status=${resp.status}`);
+
+  if (resp.status === 429) throw new Error("Rate limited, please try again later.");
+  if (resp.status === 402) throw new Error("Payment required, please add credits.");
+  if (!resp.ok) {
+    const t = await resp.text();
+    console.error("AI error:", resp.status, t.substring(0, 300));
+    return [];
+  }
+
+  const data = await resp.json();
+  const finishReason = data.choices?.[0]?.finish_reason;
+  console.log(`AI finish_reason=${finishReason}`);
+
+  // Try tool_call first
+  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (toolCall) {
+    try {
+      const args = repairAndParseJson(toolCall.function.arguments);
+      const chs = args.chapters || [];
+      console.log(`Extracted ${chs.length} chapters via tool_call`);
+      return chs;
+    } catch (e: any) {
+      console.error("Tool call JSON parse error:", e.message);
+    }
+  }
+
+  // Try content
+  const content = data.choices?.[0]?.message?.content || "";
+  if (content) {
+    console.log(`Content length=${content.length}`);
+    try {
+      const parsed = repairAndParseJson(content);
+      const chs = parsed.chapters || (Array.isArray(parsed) ? parsed : []);
+      if (chs.length) {
+        console.log(`Extracted ${chs.length} chapters from content`);
+        return chs;
+      }
+    } catch (e: any) {
+      console.error("Content JSON parse error:", e.message);
+    }
+  }
+
+  return [];
+}
+
+// ─── Main handler ────────────────────────────────────────────────
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -179,15 +403,21 @@ serve(async (req) => {
     if (!fullText || typeof fullText !== "string") {
       throw new Error("fullText is required");
     }
-
     if (fullText.length < 50) {
       throw new Error("文档内容过少，无法提取章节结构");
     }
 
-    // For chapter extraction, we only need the beginning of the document (TOC + first chapters)
-    // Sending too much text can overwhelm the model
-    const forAI =
-      fullText.length > 40000 ? fullText.substring(0, 40000) : fullText;
+    let chapters: Chapter[] = [];
+
+    // ── Step 1: Try pre-processing (regex-based TOC extraction) ──
+    const preParsed = extractTocFromText(fullText);
+    if (preParsed.length >= 3) {
+      console.log(`Pre-processing found ${preParsed.length} TOC entries`);
+      chapters = preParsed;
+    }
+
+    // ── Step 2: AI extraction (always run to get complete/custom chapters) ──
+    const forAI = selectTextForAI(fullText, 80000);
 
     const systemPrompt = `你是专业的文档结构分析师。请分析以下文档内容，提取完整的章节目录结构（包括所有层级）。
 
@@ -203,7 +433,7 @@ serve(async (req) => {
 - 罗马数字：I、II、III、IV 等
 - 字母编号：A、B、C 或 a、b、c 等
 - 混合格式：如"第一部分"、"附录A"、"附件1"、"表格清单" 等
-- 无编号但明显是章节标题的（如独占一行、加粗、字号较大的短文本）
+- 无编号但明显是章节标题的（如独占一行的短文本，像"评分索引表"、"目录"等）
 
 层级判断规则：
 - "第X章"、"第X部分"、纯数字如"1"、中文大写如"一、"→ level 1
@@ -212,11 +442,12 @@ serve(async (req) => {
 - 更深层级以此类推
 
 要求：
-1. 按照文档中实际出现的顺序列出
+1. 按照文档中实际出现的顺序列出所有章节
 2. section_number 使用文档中的原始编号（如"第一章"、"（一）"、"1.1"等）
 3. title 为章节标题文字（不含编号）
 4. 不要遗漏任何章节，宁可多识别也不要少识别
-5. 注意区分正文中的编号列表和章节标题——章节标题通常独占一行且后续有大段内容`;
+5. 如果文档中有"目录"页，以目录中列出的条目为准，并补充目录中未列出但正文中存在的章节
+6. 注意区分正文中的编号列表和章节标题——章节标题通常独占一行且后续有大段内容`;
 
     const tools = [
       {
@@ -232,18 +463,9 @@ serve(async (req) => {
                 items: {
                   type: "object",
                   properties: {
-                    section_number: {
-                      type: "string",
-                      description: "章节编号",
-                    },
-                    title: {
-                      type: "string",
-                      description: "章节标题（不含编号）",
-                    },
-                    level: {
-                      type: "integer",
-                      description: "标题层级，1为一级标题",
-                    },
+                    section_number: { type: "string", description: "章节编号" },
+                    title: { type: "string", description: "章节标题（不含编号）" },
+                    level: { type: "integer", description: "标题层级，1为一级标题" },
                   },
                   required: ["section_number", "title", "level"],
                   additionalProperties: false,
@@ -257,142 +479,42 @@ serve(async (req) => {
       },
     ];
 
-    let chapters: Chapter[] = [];
-
     const lovableKey = Deno.env.get("LOVABLE_API_KEY");
     if (lovableKey) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 120000);
+      // Attempt 1: tool_choice with gemini-2.5-pro (best for complex docs)
+      let aiChapters = await callAI(
+        lovableKey,
+        "https://ai.gateway.lovable.dev/v1",
+        "google/gemini-2.5-pro",
+        systemPrompt,
+        forAI,
+        tools,
+        16384,
+      );
 
-        const resp = await fetch(
-          "https://ai.gateway.lovable.dev/v1/chat/completions",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${lovableKey}`,
-            },
-            body: JSON.stringify({
-              model: "google/gemini-2.5-flash",
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: forAI },
-              ],
-              tools,
-              tool_choice: {
-                type: "function",
-                function: { name: "extract_chapters" },
-              },
-              max_tokens: 16384,
-              temperature: 0.1,
-            }),
-            signal: controller.signal,
-          }
+      // Attempt 2: without tool_choice (fallback)
+      if (!aiChapters.length) {
+        console.log("Retrying without tool_choice...");
+        const fallbackPrompt = systemPrompt + `\n\n请以JSON格式返回结果，格式为：{"chapters": [{"section_number": "编号", "title": "标题", "level": 层级数字}]}`;
+        aiChapters = await callAI(
+          lovableKey,
+          "https://ai.gateway.lovable.dev/v1",
+          "google/gemini-2.5-flash",
+          fallbackPrompt,
+          forAI,
+          null,
+          16384,
         );
-        clearTimeout(timer);
-
-        console.log("Lovable AI response status:", resp.status);
-
-        if (resp.status === 429)
-          throw new Error("Rate limited, please try again later.");
-        if (resp.status === 402)
-          throw new Error("Payment required, please add credits.");
-
-        if (resp.ok) {
-          const data = await resp.json();
-          console.log("AI response finish_reason:", data.choices?.[0]?.finish_reason);
-          const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-          if (toolCall) {
-            const args = JSON.parse(toolCall.function.arguments);
-            chapters = args.chapters || [];
-            console.log("Extracted chapters via tool_call:", chapters.length);
-          } else {
-            const content = data.choices?.[0]?.message?.content || "";
-            console.log("No tool_call, content length:", content.length, "preview:", content.substring(0, 200));
-            // Try to extract JSON from content
-            const match = content.match(/\{[\s\S]*\}/);
-            if (match) {
-              try {
-                const parsed = JSON.parse(match[0]);
-                chapters = parsed.chapters || [];
-              } catch { /* ignore parse error */ }
-            }
-            // Try to extract JSON array directly
-            if (!chapters.length) {
-              const arrMatch = content.match(/\[[\s\S]*\]/);
-              if (arrMatch) {
-                try {
-                  const parsed = JSON.parse(arrMatch[0]);
-                  if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].title) {
-                    chapters = parsed;
-                  }
-                } catch { /* ignore parse error */ }
-              }
-            }
-          }
-        } else {
-          const errText = await resp.text();
-          console.error("Lovable AI non-ok response:", resp.status, errText.substring(0, 500));
-        }
-      } catch (e: any) {
-        console.error("Lovable AI error:", e.message);
       }
 
-      // If tool_choice failed, retry WITHOUT tool_choice as fallback
-      if (!chapters.length && lovableKey) {
-        console.log("Retrying without tool_choice...");
-        try {
-          const controller2 = new AbortController();
-          const timer2 = setTimeout(() => controller2.abort(), 120000);
-
-          const fallbackPrompt = systemPrompt + `\n\n请以JSON格式返回结果，格式为：{"chapters": [{"section_number": "编号", "title": "标题", "level": 层级数字}]}`;
-
-          const resp2 = await fetch(
-            "https://ai.gateway.lovable.dev/v1/chat/completions",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${lovableKey}`,
-              },
-              body: JSON.stringify({
-                model: "google/gemini-2.5-flash",
-                messages: [
-                  { role: "system", content: fallbackPrompt },
-                  { role: "user", content: forAI },
-                ],
-                max_tokens: 16384,
-                temperature: 0.1,
-              }),
-              signal: controller2.signal,
-            }
-          );
-          clearTimeout(timer2);
-
-          if (resp2.ok) {
-            const data2 = await resp2.json();
-            const content2 = data2.choices?.[0]?.message?.content || "";
-            console.log("Fallback response length:", content2.length);
-            // Extract JSON from markdown code blocks or raw content
-            const cleaned = content2.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-            const jsonMatch = cleaned.match(/\{[\s\S]*"chapters"[\s\S]*\}/);
-            if (jsonMatch) {
-              try {
-                const parsed = JSON.parse(jsonMatch[0]);
-                chapters = parsed.chapters || [];
-                console.log("Fallback extracted chapters:", chapters.length);
-              } catch (pe) {
-                console.error("Fallback JSON parse error:", pe.message);
-              }
-            }
-          }
-        } catch (e: any) {
-          console.error("Fallback AI error:", e.message);
-        }
+      // Use AI result if it found more chapters than pre-processing
+      if (aiChapters.length > chapters.length) {
+        console.log(`AI found ${aiChapters.length} chapters (pre-processing: ${chapters.length}), using AI result`);
+        chapters = aiChapters;
       }
     }
 
+    // ── Step 3: Fallback to custom model_config ──
     if (!chapters.length) {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -405,35 +527,17 @@ serve(async (req) => {
         .maybeSingle();
 
       if (mc?.api_key && mc?.base_url) {
-        const resp = await fetch(`${mc.base_url}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${mc.api_key}`,
-          },
-          body: JSON.stringify({
-            model: mc.model_name,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: forAI },
-            ],
-            tools,
-            tool_choice: {
-              type: "function",
-              function: { name: "extract_chapters" },
-            },
-            max_tokens: mc.max_tokens || 8192,
-            temperature: 0.1,
-          }),
-        });
-
-        if (resp.ok) {
-          const data = await resp.json();
-          const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-          if (toolCall) {
-            const args = JSON.parse(toolCall.function.arguments);
-            chapters = args.chapters || [];
-          }
+        const mcChapters = await callAI(
+          mc.api_key,
+          mc.base_url,
+          mc.model_name,
+          systemPrompt,
+          forAI,
+          tools,
+          mc.max_tokens || 8192,
+        );
+        if (mcChapters.length > chapters.length) {
+          chapters = mcChapters;
         }
       }
     }
@@ -442,20 +546,14 @@ serve(async (req) => {
       throw new Error("AI未能识别文档章节结构，请确认文档包含清晰的章节标题");
     }
 
-    // Debug: log AI chapters and text sample
-    console.log("fullText length:", fullText.length);
-    console.log("fullText sample (first 500):", fullText.substring(0, 500));
-    console.log("AI chapters count:", chapters.length);
-    chapters.slice(0, 5).forEach((ch, i) => {
+    console.log("Final chapters count:", chapters.length);
+    chapters.slice(0, 10).forEach((ch, i) => {
       console.log(`  ch[${i}]: "${ch.section_number}" "${ch.title}" level=${ch.level}`);
     });
 
     const result = splitTextByChapters(fullText, chapters);
 
-    // Debug: log content sizes
-    result.slice(0, 5).forEach((ch, i) => {
-      console.log(`  result[${i}]: "${ch.section_number} ${ch.title}" content_len=${ch.content?.length || 0}`);
-    });
+    console.log("Mapped result count:", result.length);
 
     return new Response(
       JSON.stringify({ chapters: result, totalChapters: result.length }),
