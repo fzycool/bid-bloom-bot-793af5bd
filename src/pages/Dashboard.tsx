@@ -125,7 +125,7 @@ const Dashboard = () => {
           {modules.map((m) => (
             <button
               key={m.id}
-              onClick={() => setActiveModule(m.id)}
+              onClick={() => handleModuleChange(m.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
                 activeModule === m.id
                   ? "bg-accent text-accent-foreground"
