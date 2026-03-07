@@ -39,12 +39,19 @@ interface FlatItem {
 
 type DropPosition = "before" | "after" | "inside";
 
+interface ReorderItem {
+  id: string;
+  sort_order: number;
+  parent_id: string | null;
+  type: "section" | "toc";
+}
+
 interface TocDragEditorProps {
   sections: SectionNode[];
   tocEntries: TocEntry[];
   expandedSections: Set<string>;
   onToggle: (id: string) => void;
-  onReorder: (items: { id: string; sort_order: number; parent_section_id: string | null }[]) => void;
+  onReorder: (items: ReorderItem[]) => void;
   onRenameEntry: (id: string, title: string, type: "section" | "toc") => void;
   onDeleteEntry: (id: string, type: "section" | "toc") => void;
 }
