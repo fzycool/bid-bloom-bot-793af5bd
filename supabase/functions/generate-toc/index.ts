@@ -218,12 +218,6 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
       await supabase.from("proposal_toc_entries")
         .delete()
         .eq("proposal_id", proposalId);
-      // Clear toc-related content markers on sections
-      for (const sec of allSections) {
-        if (sec.content && (sec.content.startsWith("[已生成") || sec.content.startsWith("[无知识库匹配]") || sec.content.startsWith("[目录生成失败:"))) {
-          await supabase.from("proposal_sections").update({ content: null }).eq("id", sec.id);
-        }
-      }
     }
 
     // Build parent-child map
