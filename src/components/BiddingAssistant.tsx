@@ -2738,6 +2738,97 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
                               toast({ title: "编号更新失败", description: e.message, variant: "destructive" });
                             }
                           }}
+                          onLevelChange={async (id, type, direction) => {
+                            try {
+                              if (type === "section") {
+                                // Find the section in the tree
+                                const findSection = (nodes: ProposalSection[], parent: ProposalSection | null): { node: ProposalSection; parent: ProposalSection | null; siblings: ProposalSection[] } | null => {
+                                  for (const n of nodes) {
+                                    if (n.id === id) return { node: n, parent, siblings: nodes };
+                                    if (n.children) {
+                                      const found = findSection(n.children, n);
+                                      if (found) return found;
+                                    }
+                                  }
+                                  return null;
+                                };
+                                const found = findSection(sections, null);
+                                if (!found) return;
+
+                                if (direction === "promote") {
+                                  // Move to grandparent level (sibling of current parent)
+                                  if (!found.parent) { toast({ title: "已是顶级，无法提升" }); return; }
+                                  const newParentId = found.parent.parent_id || null;
+                                  const parentSiblings = newParentId
+                                    ? (findSection(sections, null) && sections.flatMap(function collect(s: ProposalSection): ProposalSection[] {
+                                        if (s.id === newParentId) return s.children || [];
+                                        return (s.children || []).flatMap(collect);
+                                      }))
+                                    : sections;
+                                  const maxOrder = (parentSiblings || []).reduce((m, s) => Math.max(m, s.sort_order), -1);
+                                  await supabase.from("proposal_sections").update({
+                                    parent_id: newParentId,
+                                    sort_order: maxOrder + 1,
+                                  } as any).eq("id", id);
+                                } else {
+                                  // Demote: become child of previous sibling
+                                  const sortedSiblings = [...found.siblings].sort((a, b) => a.sort_order - b.sort_order);
+                                  const idx = sortedSiblings.findIndex(s => s.id === id);
+                                  if (idx <= 0) { toast({ title: "没有前一个兄弟节点，无法降级" }); return; }
+                                  const prevSibling = sortedSiblings[idx - 1];
+                                  const prevChildren = prevSibling.children || [];
+                                  const maxOrder = prevChildren.reduce((m, s) => Math.max(m, s.sort_order), -1);
+                                  await supabase.from("proposal_sections").update({
+                                    parent_id: prevSibling.id,
+                                    sort_order: maxOrder + 1,
+                                  } as any).eq("id", id);
+                                }
+                              } else {
+                                // TOC entry: change parent_section_id
+                                const entry = tocEntries.find(e => e.id === id);
+                                if (!entry) return;
+                                const currentParent = entry.parent_section_id;
+
+                                if (direction === "promote") {
+                                  if (!currentParent) { toast({ title: "已是顶级，无法提升" }); return; }
+                                  // Find parent section's parent
+                                  const findSectionParent = (nodes: ProposalSection[]): string | null => {
+                                    for (const n of nodes) {
+                                      if (n.id === currentParent) return n.parent_id || null;
+                                      if (n.children) {
+                                        const r = findSectionParent(n.children);
+                                        if (r !== undefined) return r;
+                                      }
+                                    }
+                                    return undefined as any;
+                                  };
+                                  const grandParentId = findSectionParent(sections);
+                                  await supabase.from("proposal_toc_entries").update({
+                                    parent_section_id: grandParentId,
+                                  } as any).eq("id", id);
+                                } else {
+                                  // Demote: find a section under the current parent to become the new parent
+                                  const sibSections = currentParent
+                                    ? (sections.flatMap(function collect(s: ProposalSection): ProposalSection[] {
+                                        if (s.id === currentParent) return s.children || [];
+                                        return (s.children || []).flatMap(collect);
+                                      }))
+                                    : sections;
+                                  if (!sibSections || sibSections.length === 0) { toast({ title: "没有可用的子章节，无法降级" }); return; }
+                                  // Pick the last section as new parent
+                                  const sorted = [...sibSections].sort((a, b) => a.sort_order - b.sort_order);
+                                  const newParent = sorted[sorted.length - 1];
+                                  await supabase.from("proposal_toc_entries").update({
+                                    parent_section_id: newParent.id,
+                                  } as any).eq("id", id);
+                                }
+                              }
+                              if (selectedProposal) await fetchProposalDetails(selectedProposal.id);
+                              toast({ title: direction === "promote" ? "层级已提升" : "层级已降低" });
+                            } catch (e: any) {
+                              toast({ title: "层级调整失败", description: e.message, variant: "destructive" });
+                            }
+                          }}
                         />
                       ) : (
                         <div className="space-y-1">
