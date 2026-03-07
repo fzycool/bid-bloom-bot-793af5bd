@@ -65,6 +65,7 @@ export default function TocDragEditor({
   onReorder,
   onRenameEntry,
   onDeleteEntry,
+  onAutoNumber,
 }: TocDragEditorProps) {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<DropPosition | null>(null);
