@@ -221,6 +221,21 @@ export default function TocDragEditor({
       reordered.push({ id: sourceId, sort_order: order, parent_section_id: newParentId });
     }
 
+    // Optimistically update local state
+    setLocalTocEntries((prev) => {
+      return prev.map((entry) => {
+        const reorderedItem = reordered.find((r) => r.id === entry.id);
+        if (reorderedItem) {
+          return {
+            ...entry,
+            sort_order: reorderedItem.sort_order,
+            parent_section_id: reorderedItem.parent_section_id,
+          };
+        }
+        return entry;
+      });
+    });
+
     onReorder(reordered);
     setDragId(null);
     setDragOverId(null);
