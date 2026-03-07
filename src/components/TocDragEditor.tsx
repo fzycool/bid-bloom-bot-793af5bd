@@ -51,7 +51,7 @@ interface TocDragEditorProps {
 
 export default function TocDragEditor({
   sections,
-  tocEntries,
+  tocEntries: externalTocEntries,
   expandedSections,
   onToggle,
   onReorder,
@@ -64,6 +64,16 @@ export default function TocDragEditor({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const editRef = useRef<HTMLInputElement>(null);
+
+  // Local optimistic state for toc entries
+  const [localTocEntries, setLocalTocEntries] = useState<TocEntry[]>(externalTocEntries);
+  
+  // Sync from props when external data changes (e.g. after refetch)
+  React.useEffect(() => {
+    setLocalTocEntries(externalTocEntries);
+  }, [externalTocEntries]);
+
+  const tocEntries = localTocEntries;
 
   // Build TOC map by parent
   const tocByParent = new Map<string, TocEntry[]>();
@@ -210,6 +220,21 @@ export default function TocDragEditor({
     if (!inserted) {
       reordered.push({ id: sourceId, sort_order: order, parent_section_id: newParentId });
     }
+
+    // Optimistically update local state
+    setLocalTocEntries((prev) => {
+      return prev.map((entry) => {
+        const reorderedItem = reordered.find((r) => r.id === entry.id);
+        if (reorderedItem) {
+          return {
+            ...entry,
+            sort_order: reorderedItem.sort_order,
+            parent_section_id: reorderedItem.parent_section_id,
+          };
+        }
+        return entry;
+      });
+    });
 
     onReorder(reordered);
     setDragId(null);
