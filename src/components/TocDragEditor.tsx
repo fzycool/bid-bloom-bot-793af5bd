@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
-import { GripVertical, ChevronRight, ChevronDown, Pencil, Trash2, Check, X } from "lucide-react";
+import { GripVertical, ChevronRight, ChevronDown, Pencil, Trash2, Check, X, ListOrdered } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +54,7 @@ interface TocDragEditorProps {
   onReorder: (items: ReorderItem[]) => void;
   onRenameEntry: (id: string, title: string, type: "section" | "toc") => void;
   onDeleteEntry: (id: string, type: "section" | "toc") => void;
+  onAutoNumber?: (items: { id: string; section_number: string; type: "section" | "toc" }[]) => void;
 }
 
 export default function TocDragEditor({
@@ -64,6 +65,7 @@ export default function TocDragEditor({
   onReorder,
   onRenameEntry,
   onDeleteEntry,
+  onAutoNumber,
 }: TocDragEditorProps) {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<DropPosition | null>(null);
@@ -275,8 +277,56 @@ export default function TocDragEditor({
     setEditingId(null);
   };
 
+  // Auto-numbering logic
+  const handleAutoNumber = useCallback(() => {
+    const result: { id: string; section_number: string; type: "section" | "toc" }[] = [];
+
+    const numberSection = (node: SectionNode, prefix: string, index: number) => {
+      const num = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
+      result.push({ id: node.id, section_number: num, type: "section" });
+
+      // Number child sections
+      const sortedChildren = [...(node.children || [])].sort((a, b) => a.sort_order - b.sort_order);
+      sortedChildren.forEach((child, i) => numberSection(child, num, i));
+
+      // Number toc entries under this section
+      const tocChildren = (tocByParent.get(node.id) || []).sort((a, b) => a.sort_order - b.sort_order);
+      tocChildren.forEach((toc, i) => {
+        const tocNum = `${num}.${sortedChildren.length + i + 1}`;
+        result.push({ id: toc.id, section_number: tocNum, type: "toc" });
+      });
+    };
+
+    const sortedRoots = [...localSections].sort((a, b) => a.sort_order - b.sort_order);
+    sortedRoots.forEach((s, i) => numberSection(s, "", i));
+
+    // Optimistic update
+    const numMap = new Map(result.map(r => [r.id, r.section_number]));
+    setLocalSections(prev => {
+      const update = (nodes: SectionNode[]): SectionNode[] =>
+        nodes.map(n => ({
+          ...n,
+          section_number: numMap.get(n.id) ?? n.section_number,
+          children: n.children ? update(n.children) : undefined,
+        }));
+      return update(prev);
+    });
+    setLocalTocEntries(prev =>
+      prev.map(e => ({ ...e, section_number: numMap.get(e.id) ?? e.section_number }))
+    );
+
+    onAutoNumber?.(result);
+  }, [localSections, tocByParent, onAutoNumber]);
+
   return (
     <div className="space-y-0.5">
+      {onAutoNumber && (
+        <div className="flex justify-end mb-2">
+          <Button size="sm" variant="outline" onClick={handleAutoNumber}>
+            <ListOrdered className="w-3.5 h-3.5 mr-1" />自动编号
+          </Button>
+        </div>
+      )}
       {flatItems.map((item) => {
         const isOver = dragOverId === item.id;
         const isDragging = dragId === item.id;
