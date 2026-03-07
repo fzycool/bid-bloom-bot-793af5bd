@@ -39,12 +39,19 @@ interface FlatItem {
 
 type DropPosition = "before" | "after" | "inside";
 
+interface ReorderItem {
+  id: string;
+  sort_order: number;
+  parent_id: string | null;
+  type: "section" | "toc";
+}
+
 interface TocDragEditorProps {
   sections: SectionNode[];
   tocEntries: TocEntry[];
   expandedSections: Set<string>;
   onToggle: (id: string) => void;
-  onReorder: (items: { id: string; sort_order: number; parent_section_id: string | null }[]) => void;
+  onReorder: (items: ReorderItem[]) => void;
   onRenameEntry: (id: string, title: string, type: "section" | "toc") => void;
   onDeleteEntry: (id: string, type: "section" | "toc") => void;
 }
@@ -65,13 +72,18 @@ export default function TocDragEditor({
   const [editTitle, setEditTitle] = useState("");
   const editRef = useRef<HTMLInputElement>(null);
 
-  // Local optimistic state for toc entries
+  // Local optimistic state
   const [localTocEntries, setLocalTocEntries] = useState<TocEntry[]>(externalTocEntries);
+  const [localSections, setLocalSections] = useState<SectionNode[]>(sections);
   
   // Sync from props when external data changes (e.g. after refetch)
   React.useEffect(() => {
     setLocalTocEntries(externalTocEntries);
   }, [externalTocEntries]);
+  
+  React.useEffect(() => {
+    setLocalSections(sections);
+  }, [sections]);
 
   const tocEntries = localTocEntries;
 
@@ -116,7 +128,7 @@ export default function TocDragEditor({
       });
     }
   };
-  sections.forEach((s) => flattenSection(s, 0));
+  localSections.forEach((s) => flattenSection(s, 0));
 
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     setDragId(id);
@@ -172,24 +184,18 @@ export default function TocDragEditor({
     const source = flatItems[sourceIdx];
     const target = flatItems[targetIdx];
 
-    // Only allow reordering toc entries (within toc entries) for simplicity
-    // Sections can also be reordered
     let newParentId: string | null;
     let insertIdx: number;
 
     if (dropPosition === "inside") {
-      // Make it a child of target (only if target is a section)
       if (target.type === "section") {
         newParentId = target.id;
-        const existingChildren = tocByParent.get(target.id) || [];
-        insertIdx = existingChildren.length;
+        insertIdx = 999; // append at end
       } else {
-        return; // Can't drop inside a toc entry
+        return;
       }
     } else {
-      // Before/after the target - same parent
       newParentId = target.parentId;
-      // Compute insertion sort_order
       if (dropPosition === "before") {
         insertIdx = target.sort_order;
       } else {
@@ -197,40 +203,51 @@ export default function TocDragEditor({
       }
     }
 
-    // Build reorder updates: we only handle toc_entries reordering for now
-    // Get all siblings at the new parent
-    const siblings = tocEntries
-      .filter((t) => (t.parent_section_id || null) === newParentId && t.id !== sourceId)
+    // Collect all siblings at the target parent (same type as source)
+    const allSiblings = flatItems
+      .filter((f) => f.parentId === newParentId && f.type === source.type && f.id !== sourceId)
       .sort((a, b) => a.sort_order - b.sort_order);
 
-    // Insert the source at the right position
-    const reordered: { id: string; sort_order: number; parent_section_id: string | null }[] = [];
+    const reordered: ReorderItem[] = [];
     let inserted = false;
     let order = 0;
 
-    for (const sib of siblings) {
+    for (const sib of allSiblings) {
       if (!inserted && order >= insertIdx) {
-        reordered.push({ id: sourceId, sort_order: order, parent_section_id: newParentId });
+        reordered.push({ id: sourceId, sort_order: order, parent_id: newParentId, type: source.type });
         order++;
         inserted = true;
       }
-      reordered.push({ id: sib.id, sort_order: order, parent_section_id: sib.parent_section_id });
+      reordered.push({ id: sib.id, sort_order: order, parent_id: sib.parentId, type: sib.type });
       order++;
     }
     if (!inserted) {
-      reordered.push({ id: sourceId, sort_order: order, parent_section_id: newParentId });
+      reordered.push({ id: sourceId, sort_order: order, parent_id: newParentId, type: source.type });
     }
 
-    // Optimistically update local state
+    // Optimistically update local sections state
+    setLocalSections((prev) => {
+      const updateNode = (nodes: SectionNode[]): SectionNode[] => {
+        return nodes.map((node) => {
+          const item = reordered.find((r) => r.id === node.id);
+          const updated = item
+            ? { ...node, sort_order: item.sort_order, parent_id: item.parent_id }
+            : node;
+          return {
+            ...updated,
+            children: updated.children ? updateNode(updated.children) : undefined,
+          };
+        }).sort((a, b) => a.sort_order - b.sort_order);
+      };
+      return updateNode(prev);
+    });
+
+    // Optimistically update local toc entries state
     setLocalTocEntries((prev) => {
       return prev.map((entry) => {
-        const reorderedItem = reordered.find((r) => r.id === entry.id);
-        if (reorderedItem) {
-          return {
-            ...entry,
-            sort_order: reorderedItem.sort_order,
-            parent_section_id: reorderedItem.parent_section_id,
-          };
+        const item = reordered.find((r) => r.id === entry.id);
+        if (item) {
+          return { ...entry, sort_order: item.sort_order, parent_section_id: item.parent_id };
         }
         return entry;
       });
@@ -240,7 +257,7 @@ export default function TocDragEditor({
     setDragId(null);
     setDragOverId(null);
     setDropPosition(null);
-  }, [flatItems, dropPosition, tocEntries, onReorder]);
+  }, [flatItems, dropPosition, onReorder]);
 
   const startEditing = (item: FlatItem) => {
     setEditingId(item.id);
