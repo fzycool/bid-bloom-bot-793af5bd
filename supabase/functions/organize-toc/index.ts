@@ -10,17 +10,22 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { sections, tocEntries } = await req.json();
+    const { outlineSections, importedChapters, tocEntries } = await req.json();
 
-    if (!sections || !tocEntries || !Array.isArray(sections) || !Array.isArray(tocEntries)) {
-      return new Response(JSON.stringify({ error: "缺少必要参数" }), {
+    if (!outlineSections || !Array.isArray(outlineSections)) {
+      return new Response(JSON.stringify({ error: "缺少提纲章节数据" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (tocEntries.length === 0) {
-      return new Response(JSON.stringify({ assignments: [] }), {
+    const allItems = [
+      ...(importedChapters || []).map((c: any) => ({ ...c, item_type: "section" })),
+      ...(tocEntries || []).map((e: any) => ({ ...e, item_type: "toc" })),
+    ];
+
+    if (allItems.length === 0) {
+      return new Response(JSON.stringify({ assignments: [], duplicates: [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -28,7 +33,7 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    // Build compact outline - only id and title
+    // Build compact outline tree text
     const buildOutline = (nodes: any[], depth = 0): string => {
       return nodes
         .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
@@ -41,14 +46,14 @@ serve(async (req) => {
         .join("\n");
     };
 
-    const outlineText = buildOutline(sections);
+    const outlineText = buildOutline(outlineSections);
 
-    // Compact TOC list
-    const tocText = tocEntries
-      .map((e: any) => `[${e.id}] ${e.title}`)
+    // Build items list
+    const itemsText = allItems
+      .map((e: any) => `[${e.id}] (${e.item_type}) ${e.title}`)
       .join("\n");
 
-    // Collect all valid section IDs for validation
+    // Collect all valid outline section IDs
     const allSectionIds = new Set<string>();
     const collectIds = (nodes: any[]) => {
       for (const n of nodes) {
@@ -56,25 +61,30 @@ serve(async (req) => {
         if (n.children) collectIds(n.children);
       }
     };
-    collectIds(sections);
+    collectIds(outlineSections);
 
-    const systemPrompt = `你是标书目录整理专家。将目录条目归类到最合适的提纲章节下。
+    const systemPrompt = `你是标书目录整理专家。你的任务是将待整理的目录条目归类到投标文件提纲的章节下。
+
 规则：
-1. 根据标题语义匹配最合适的章节
-2. 同一父级下的条目按逻辑排序(sort_order从0开始)
-3. 必须调用organize_toc工具返回结果
-4. parent_section_id必须是提纲中的有效章节ID`;
+1. 根据标题语义，将每个待整理条目分配到最合适的提纲章节下
+2. 如果有多个条目标题含义相同或高度相似（重复），只保留一个，将其他标记为重复删除
+3. parent_section_id 必须是提纲中存在的有效章节ID
+4. 同一父级下的条目按逻辑顺序排列(sort_order从0开始递增)
+5. 必须调用 organize_toc 工具返回结果
+6. 对于无法归类的条目，分配到最接近的提纲章节下`;
 
-    const userPrompt = `提纲章节：
+    const userPrompt = `投标文件提纲（目标结构）：
 ${outlineText}
 
-待归类目录条目：
-${tocText}`;
+待整理的目录条目：
+${itemsText}
 
-    console.log(`Processing ${tocEntries.length} toc entries against ${allSectionIds.size} sections`);
+请将所有待整理条目归类到提纲章节下。如果有标题重复或含义相同的条目，只保留一个，其余标记为重复。`;
+
+    console.log(`Processing ${allItems.length} items against ${allSectionIds.size} outline sections`);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    const timer = setTimeout(() => controller.abort(), 60000);
 
     try {
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -84,7 +94,7 @@ ${tocText}`;
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "google/gemini-2.5-flash",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -100,18 +110,33 @@ ${tocText}`;
                   properties: {
                     assignments: {
                       type: "array",
+                      description: "保留的条目及其新的父级分配",
                       items: {
                         type: "object",
                         properties: {
-                          toc_entry_id: { type: "string", description: "目录条目ID" },
-                          parent_section_id: { type: "string", description: "目标章节ID" },
-                          sort_order: { type: "integer", description: "排序" },
+                          item_id: { type: "string", description: "条目ID" },
+                          item_type: { type: "string", enum: ["section", "toc"], description: "条目类型" },
+                          parent_section_id: { type: "string", description: "目标提纲章节ID" },
+                          sort_order: { type: "integer", description: "排序序号" },
                         },
-                        required: ["toc_entry_id", "parent_section_id", "sort_order"],
+                        required: ["item_id", "item_type", "parent_section_id", "sort_order"],
+                      },
+                    },
+                    duplicates: {
+                      type: "array",
+                      description: "需要删除的重复条目",
+                      items: {
+                        type: "object",
+                        properties: {
+                          item_id: { type: "string", description: "重复条目ID" },
+                          item_type: { type: "string", enum: ["section", "toc"], description: "条目类型" },
+                          reason: { type: "string", description: "重复原因" },
+                        },
+                        required: ["item_id", "item_type"],
                       },
                     },
                   },
-                  required: ["assignments"],
+                  required: ["assignments", "duplicates"],
                 },
               },
             },
@@ -149,27 +174,37 @@ ${tocText}`;
       let parsed: any;
       try {
         parsed = JSON.parse(toolCall.function.arguments);
-      } catch (parseErr) {
-        // Try to repair truncated JSON
+      } catch {
         let raw = toolCall.function.arguments;
-        // Remove trailing incomplete entry
         const lastComplete = raw.lastIndexOf("}");
         if (lastComplete > 0) {
-          raw = raw.substring(0, lastComplete + 1) + "]}";
+          raw = raw.substring(0, lastComplete + 1);
+          // Try to close arrays and object
+          if (!raw.includes('"duplicates"')) {
+            raw += '], "duplicates": []}';
+          } else {
+            raw += "]}";
+          }
           parsed = JSON.parse(raw);
         } else {
           throw new Error("AI返回的JSON格式无效");
         }
       }
 
-      // Validate assignments - filter out invalid section IDs
+      // Validate: filter out invalid section IDs and item IDs
+      const allItemIds = new Set(allItems.map((i: any) => i.id));
+
       const validAssignments = (parsed.assignments || []).filter((a: any) =>
-        a.toc_entry_id && a.parent_section_id && allSectionIds.has(a.parent_section_id)
+        a.item_id && a.parent_section_id && allSectionIds.has(a.parent_section_id) && allItemIds.has(a.item_id)
       );
 
-      console.log(`Valid assignments: ${validAssignments.length} / ${parsed.assignments?.length || 0}`);
+      const validDuplicates = (parsed.duplicates || []).filter((d: any) =>
+        d.item_id && allItemIds.has(d.item_id)
+      );
 
-      return new Response(JSON.stringify({ assignments: validAssignments }), {
+      console.log(`Assignments: ${validAssignments.length}, Duplicates: ${validDuplicates.length}`);
+
+      return new Response(JSON.stringify({ assignments: validAssignments, duplicates: validDuplicates }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (fetchErr) {
