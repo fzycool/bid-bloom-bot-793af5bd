@@ -335,9 +335,14 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
         console.error(`Query failed for section ${leaf.title}:`, queryErr);
         if (queryErr.message === "TIMEOUT") {
           console.warn(`Section "${leaf.title}" timed out, treating as no KB match`);
-          await supabase.from("proposal_sections").update({
-            content: "[无知识库匹配] 知识库查询超时，该章节默认无子章节。",
-          }).eq("id", leaf.id);
+          await supabase.from("proposal_toc_entries").insert({
+            proposal_id: proposalId,
+            parent_section_id: leaf.id,
+            title: "__NO_KB_MATCH__",
+            content: "知识库查询超时，该章节默认无子章节。",
+            section_number: leaf.section_number || "",
+            sort_order: leaf.sort_order * 100,
+          });
         } else {
           // Mark failure but don't pollute the outline
           console.error(`Section "${leaf.title}" failed: ${queryErr.message}`);
