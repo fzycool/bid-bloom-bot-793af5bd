@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
-import { GripVertical, ChevronRight, ChevronDown, Pencil, Trash2, Check, X, ListOrdered, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { GripVertical, ChevronRight, ChevronDown, Pencil, Trash2, Check, X, ListOrdered, ArrowUpRight, ArrowDownRight, Wand2, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
