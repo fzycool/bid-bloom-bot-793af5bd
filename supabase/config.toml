@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.classify-bid-chapters]
 verify_jwt = false
+
+[functions.organize-toc]
+verify_jwt = false
