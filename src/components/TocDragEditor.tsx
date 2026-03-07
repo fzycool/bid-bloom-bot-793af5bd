@@ -340,125 +340,156 @@ export default function TocDragEditor({
         const isOver = dragOverId === item.id;
         const isDragging = dragId === item.id;
 
+        const canPromote = item.depth > 0; // has a parent, can move up
+        const canDemote = true; // can always try to become child of previous sibling
+
         return (
-          <div key={item.id} className="relative">
-            {/* Drop indicator: before */}
-            {isOver && dropPosition === "before" && (
-              <div className="absolute top-0 left-0 right-0 h-0.5 bg-accent z-10 rounded-full" />
-            )}
+          <ContextMenu key={item.id}>
+            <ContextMenuTrigger asChild>
+              <div className="relative">
+                {/* Drop indicator: before */}
+                {isOver && dropPosition === "before" && (
+                  <div className="absolute top-0 left-0 right-0 h-0.5 bg-accent z-10 rounded-full" />
+                )}
 
-            <div
-              draggable
-              onDragStart={(e) => handleDragStart(e, item.id)}
-              onDragEnd={handleDragEnd}
-              onDragOver={(e) => handleDragOver(e, item.id)}
-              onDragLeave={() => { if (dragOverId === item.id) { setDragOverId(null); setDropPosition(null); } }}
-              onDrop={(e) => handleDrop(e, item.id)}
-              className={cn(
-                "flex items-center gap-1 py-1.5 px-1 rounded text-sm group transition-colors select-none",
-                isDragging && "opacity-40",
-                isOver && dropPosition === "inside" && "bg-accent/10 ring-1 ring-accent/30",
-                !isDragging && !isOver && "hover:bg-muted/50",
-              )}
-              style={{ paddingLeft: item.depth * 16 + 4 }}
-            >
-              {/* Drag handle */}
-              <GripVertical className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity" />
-
-              {/* Expand/collapse */}
-              {item.hasChildren ? (
-                <button onClick={() => onToggle(item.id)} className="shrink-0">
-                  {expandedSections.has(item.id) ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                  )}
-                </button>
-              ) : (
-                <span className="w-3.5 shrink-0" />
-              )}
-
-              {/* Section number */}
-              {item.section_number && (
-                <span className={cn(
-                  "text-xs font-mono shrink-0",
-                  item.type === "toc" ? "text-accent" : "text-muted-foreground"
-                )}>
-                  {item.section_number}
-                </span>
-              )}
-
-              {/* Title */}
-              {editingId === item.id ? (
-                <div className="flex items-center gap-1 flex-1 min-w-0">
-                  <Input
-                    ref={editRef}
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") commitEdit(item);
-                      if (e.key === "Escape") setEditingId(null);
-                    }}
-                    className="h-6 text-sm py-0 px-1.5"
-                  />
-                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => commitEdit(item)}>
-                    <Check className="w-3 h-3" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEditingId(null)}>
-                    <X className="w-3 h-3" />
-                  </Button>
-                </div>
-              ) : (
-                <span
+                <div
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, item.id)}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleDragOver(e, item.id)}
+                  onDragLeave={() => { if (dragOverId === item.id) { setDragOverId(null); setDropPosition(null); } }}
+                  onDrop={(e) => handleDrop(e, item.id)}
                   className={cn(
-                    "truncate flex-1",
-                    item.type === "section" ? "font-medium" : "text-foreground/80"
+                    "flex items-center gap-1 py-1.5 px-1 rounded text-sm group transition-colors select-none",
+                    isDragging && "opacity-40",
+                    isOver && dropPosition === "inside" && "bg-accent/10 ring-1 ring-accent/30",
+                    !isDragging && !isOver && "hover:bg-muted/50",
                   )}
-                  onDoubleClick={() => startEditing(item)}
+                  style={{ paddingLeft: item.depth * 16 + 4 }}
                 >
-                  {item.title}
-                </span>
-              )}
+                  {/* Drag handle */}
+                  <GripVertical className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity" />
 
-              {/* Content indicator */}
-              {item.type === "toc" && item.content && !expandedSections.has(item.id) && (
-                <span className="text-xs text-accent">●</span>
-              )}
+                  {/* Expand/collapse */}
+                  {item.hasChildren ? (
+                    <button onClick={() => onToggle(item.id)} className="shrink-0">
+                      {expandedSections.has(item.id) ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="w-3.5 shrink-0" />
+                  )}
 
-              {/* Badge for child count */}
-              {item.hasChildren && !expandedSections.has(item.id) && item.type === "section" && (
-                <Badge variant="secondary" className="text-[10px] px-1.5 shrink-0">
-                  {(tocByParent.get(item.id) || []).length}项
-                </Badge>
-              )}
+                  {/* Section number */}
+                  {item.section_number && (
+                    <span className={cn(
+                      "text-xs font-mono shrink-0",
+                      item.type === "toc" ? "text-accent" : "text-muted-foreground"
+                    )}>
+                      {item.section_number}
+                    </span>
+                  )}
 
-              {/* Edit/Delete buttons */}
-              {editingId !== item.id && (
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => startEditing(item)}>
-                    <Pencil className="w-3 h-3 text-muted-foreground" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => onDeleteEntry(item.id, item.type)}>
-                    <Trash2 className="w-3 h-3 text-muted-foreground" />
-                  </Button>
+                  {/* Title */}
+                  {editingId === item.id ? (
+                    <div className="flex items-center gap-1 flex-1 min-w-0">
+                      <Input
+                        ref={editRef}
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit(item);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="h-6 text-sm py-0 px-1.5"
+                      />
+                      <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => commitEdit(item)}>
+                        <Check className="w-3 h-3" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEditingId(null)}>
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <span
+                      className={cn(
+                        "truncate flex-1",
+                        item.type === "section" ? "font-medium" : "text-foreground/80"
+                      )}
+                      onDoubleClick={() => startEditing(item)}
+                    >
+                      {item.title}
+                    </span>
+                  )}
+
+                  {/* Content indicator */}
+                  {item.type === "toc" && item.content && !expandedSections.has(item.id) && (
+                    <span className="text-xs text-accent">●</span>
+                  )}
+
+                  {/* Badge for child count */}
+                  {item.hasChildren && !expandedSections.has(item.id) && item.type === "section" && (
+                    <Badge variant="secondary" className="text-[10px] px-1.5 shrink-0">
+                      {(tocByParent.get(item.id) || []).length}项
+                    </Badge>
+                  )}
+
+                  {/* Edit/Delete buttons */}
+                  {editingId !== item.id && (
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => startEditing(item)}>
+                        <Pencil className="w-3 h-3 text-muted-foreground" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => onDeleteEntry(item.id, item.type)}>
+                        <Trash2 className="w-3 h-3 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* TOC content preview when expanded */}
-            {item.type === "toc" && expandedSections.has(item.id) && item.content && (
-              <div style={{ paddingLeft: (item.depth + 1) * 16 + 8 }} className="mb-2 pr-2">
-                <div className="border rounded-md p-3 bg-muted/30 text-xs text-foreground whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
-                  {item.content}
-                </div>
+                {/* TOC content preview when expanded */}
+                {item.type === "toc" && expandedSections.has(item.id) && item.content && (
+                  <div style={{ paddingLeft: (item.depth + 1) * 16 + 8 }} className="mb-2 pr-2">
+                    <div className="border rounded-md p-3 bg-muted/30 text-xs text-foreground whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                      {item.content}
+                    </div>
+                  </div>
+                )}
+
+                {/* Drop indicator: after */}
+                {isOver && dropPosition === "after" && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent z-10 rounded-full" />
+                )}
               </div>
-            )}
-
-            {/* Drop indicator: after */}
-            {isOver && dropPosition === "after" && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent z-10 rounded-full" />
-            )}
-          </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem
+                disabled={!canPromote}
+                onClick={() => onLevelChange?.(item.id, item.type, "promote")}
+              >
+                <ArrowUpRight className="w-4 h-4 mr-2" />
+                提升层级
+              </ContextMenuItem>
+              <ContextMenuItem
+                onClick={() => onLevelChange?.(item.id, item.type, "demote")}
+              >
+                <ArrowDownRight className="w-4 h-4 mr-2" />
+                降低层级
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => startEditing(item)}>
+                <Pencil className="w-4 h-4 mr-2" />
+                重命名
+              </ContextMenuItem>
+              <ContextMenuItem className="text-destructive" onClick={() => onDeleteEntry(item.id, item.type)}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                删除
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         );
       })}
     </div>
