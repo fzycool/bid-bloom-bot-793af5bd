@@ -25,18 +25,18 @@ serve(async (req) => {
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
     const configMaxTokens = modelConfig?.max_tokens || (isLovable ? 32000 : 8192);
 
-    const { proposalId } = await req.json();
+    const { proposalId, resume } = await req.json();
     if (!proposalId) throw new Error("proposalId is required");
 
     // Update status
     await supabase.from("bid_proposals").update({
       proposal_doc_status: "processing",
-      proposal_doc_progress: "正在准备数据...",
+      proposal_doc_progress: resume ? "正在继续编写..." : "正在准备数据...",
     }).eq("id", proposalId);
 
     // Do heavy work in background
     const backgroundTask = generateProposalDoc(supabase, {
-      proposalId, aiUrl, aiModel, aiKey, isLovable, maxTokens: configMaxTokens,
+      proposalId, aiUrl, aiModel, aiKey, isLovable, maxTokens: configMaxTokens, resume: !!resume,
     }).catch(async (error: any) => {
       console.error("generate-proposal background error:", error);
       await supabase.from("bid_proposals").update({
@@ -45,11 +45,9 @@ serve(async (req) => {
       }).eq("id", proposalId);
     });
 
-    // Use waitUntil if available, otherwise await directly
     if ((globalThis as any).EdgeRuntime?.waitUntil) {
       (globalThis as any).EdgeRuntime.waitUntil(backgroundTask);
     } else {
-      // Fallback: run inline (may timeout for large proposals)
       await backgroundTask;
     }
 
@@ -65,37 +63,41 @@ serve(async (req) => {
   }
 });
 
-// Simple keyword matching: check if title/content keywords overlap with material descriptions
 function computeMatchScore(tocTitle: string, tocContent: string | null, material: any): number {
   const tocText = `${tocTitle} ${tocContent || ""}`.toLowerCase();
   const matText = `${material.file_name || ""} ${material.content_description || ""} ${material.material_type || ""} ${(material.ai_extracted_info as any)?.summary || ""}`.toLowerCase();
-
-  // Direct keyword matching
   const keywords = tocText.split(/[\s,，、。；;：:（）()\-—·]+/).filter((w: string) => w.length >= 2);
   if (keywords.length === 0) return 0;
-
   let matchCount = 0;
   for (const kw of keywords) {
     if (matText.includes(kw)) matchCount++;
   }
-
-  // Industry-standard identifiers boost
   const certPatterns = ["iso", "cmmi", "tmmi", "gb/t", "gb ", "营业执照", "资质证书", "许可证", "安全生产", "质量管理", "环境管理", "信息安全", "软件著作权", "专利", "税务", "财务报表", "审计报告", "社保", "业绩"];
   for (const pat of certPatterns) {
     if (tocText.includes(pat) && matText.includes(pat)) matchCount += 3;
   }
-
   return matchCount / Math.max(keywords.length, 1);
+}
+
+// Helper: check if the task should stop (paused or cancelled)
+async function checkShouldStop(supabase: any, proposalId: string): Promise<"ok" | "paused" | "cancelled"> {
+  const { data } = await supabase.from("bid_proposals")
+    .select("proposal_doc_status")
+    .eq("id", proposalId).single();
+  if (!data) return "cancelled";
+  const st = data.proposal_doc_status;
+  if (st === "paused") return "paused";
+  if (st === "cancelled" || st === "pending") return "cancelled";
+  return "ok";
 }
 
 async function generateProposalDoc(supabase: any, opts: {
   proposalId: string; aiUrl: string; aiModel: string; aiKey: string;
-  isLovable: boolean; maxTokens: number;
+  isLovable: boolean; maxTokens: number; resume: boolean;
 }) {
-  const { proposalId, aiUrl, aiModel, aiKey, isLovable, maxTokens } = opts;
+  const { proposalId, aiUrl, aiModel, aiKey, isLovable, maxTokens, resume } = opts;
 
   try {
-    // Step 1: Fetch proposal + analysis
     await supabase.from("bid_proposals").update({
       proposal_doc_progress: "正在加载项目数据...",
     }).eq("id", proposalId);
@@ -107,7 +109,6 @@ async function generateProposalDoc(supabase: any, opts: {
 
     const bid = proposal.bid_analyses;
 
-    // Step 2: Fetch all needed data in parallel
     await supabase.from("bid_proposals").update({
       proposal_doc_progress: "正在加载提纲和材料数据...",
     }).eq("id", proposalId);
@@ -131,7 +132,6 @@ async function generateProposalDoc(supabase: any, opts: {
     const allTocEntries = (tocEntries || []) as any[];
     const allCompanyMaterials = (companyMaterials || []) as any[];
 
-    // Build section tree
     const roots = allSections.filter((s: any) => !s.parent_id);
     const childMap = new Map<string, any[]>();
     for (const s of allSections) {
@@ -141,7 +141,6 @@ async function generateProposalDoc(supabase: any, opts: {
       }
     }
 
-    // Build TOC entries map by parent_section_id
     const tocBySection = new Map<string, any[]>();
     for (const t of allTocEntries) {
       const pid = t.parent_section_id || "__root__";
@@ -149,7 +148,6 @@ async function generateProposalDoc(supabase: any, opts: {
       tocBySection.get(pid)!.push(t);
     }
 
-    // Build outline text for context
     let outlineText = "";
     for (const root of roots) {
       outlineText += `${root.section_number || ""} ${root.title}\n`;
@@ -159,73 +157,83 @@ async function generateProposalDoc(supabase: any, opts: {
       }
     }
 
-    // Materials summary
     const materialsSummary = (materials || []).map((m: any) =>
       `- ${m.material_name || "未知"} [${m.requirement_type}] 状态:${m.status}`
     ).join("\n");
 
-    // Knowledge base summary
     const kbSummary = (docs || []).map((d: any, idx: number) =>
       `[KB-${idx + 1}] 文件名:${d.file_name} | 分类:${d.doc_category || "未分类"} | 行业:${d.industry || "未知"} | 摘要:${d.ai_summary || "无"} | 标签:${(d.tags || []).join(",") || "无"}`
     ).join("\n");
 
-    // Personnel summary
     const personnelSummary = (employees || []).map((e: any) =>
       `- ${e.name}: ${e.current_position || ""}, 学历:${e.education || "未知"}, 专业:${e.major || "未知"}, 技能:${(e.skills || []).join(",")}, 证书:${(e.certifications || []).join(",")}, ${e.years_of_experience || "?"}年经验`
     ).join("\n");
 
-    // Parse existing outline for strategy
     let parsedOutline: any = null;
     if (proposal.outline_content) {
       try { parsedOutline = JSON.parse(proposal.outline_content); } catch { /* ignore */ }
     }
 
-    // Step 3: Match company materials to TOC entries / sections
+    // Match materials
     await supabase.from("bid_proposals").update({
       proposal_doc_progress: "正在匹配公司材料库...",
     }).eq("id", proposalId);
 
-    // For each section, find best matching company materials
     const sectionMaterialMap = new Map<string, { material: any; score: number }[]>();
-
     for (const section of allSections) {
       const matches: { material: any; score: number }[] = [];
-
-      // Also include TOC entries under this section for richer matching
       const tocForSection = tocBySection.get(section.id) || [];
       const tocTexts = tocForSection.map((t: any) => `${t.title} ${t.content || ""}`).join(" ");
       const fullSearchText = `${section.title} ${section.content || ""} ${tocTexts}`;
-
       for (const mat of allCompanyMaterials) {
         const score = computeMatchScore(fullSearchText, null, mat);
-        if (score > 0.15) {
-          matches.push({ material: mat, score });
-        }
+        if (score > 0.15) matches.push({ material: mat, score });
       }
-
-      // Sort by score descending, keep top 3
       matches.sort((a, b) => b.score - a.score);
-      if (matches.length > 0) {
-        sectionMaterialMap.set(section.id, matches.slice(0, 3));
-      }
+      if (matches.length > 0) sectionMaterialMap.set(section.id, matches.slice(0, 3));
     }
 
     const totalSectionsToGenerate = roots.length;
     let completedSections = 0;
 
-    // Step 4: Generate content section by section
+    // Generate content section by section
     for (const root of roots) {
+      // Check pause/cancel before each section
+      const stopStatus = await checkShouldStop(supabase, proposalId);
+      if (stopStatus === "cancelled") {
+        // Cancelled: clear all generated content
+        for (const sec of allSections) {
+          await supabase.from("proposal_sections").update({ content: null }).eq("id", sec.id);
+        }
+        await supabase.from("bid_proposals").update({
+          proposal_doc_status: "pending",
+          proposal_doc_progress: null,
+        }).eq("id", proposalId);
+        console.log("Proposal generation cancelled for:", proposalId);
+        return;
+      }
+      if (stopStatus === "paused") {
+        await supabase.from("bid_proposals").update({
+          proposal_doc_progress: `已暂停 (已完成 ${completedSections}/${totalSectionsToGenerate} 个章节)`,
+        }).eq("id", proposalId);
+        console.log("Proposal generation paused for:", proposalId);
+        return;
+      }
+
+      // Skip sections that already have content (for resume)
+      if (resume && root.content && root.content.trim().length > 50) {
+        completedSections++;
+        continue;
+      }
+
       const children = childMap.get(root.id) || [];
       const tocForRoot = tocBySection.get(root.id) || [];
 
-      // Gather matched materials for this section and its children
       const matchedMats = sectionMaterialMap.get(root.id) || [];
       for (const child of children) {
         const childMats = sectionMaterialMap.get(child.id) || [];
         for (const cm of childMats) {
-          if (!matchedMats.find(m => m.material.id === cm.material.id)) {
-            matchedMats.push(cm);
-          }
+          if (!matchedMats.find(m => m.material.id === cm.material.id)) matchedMats.push(cm);
         }
       }
 
@@ -233,7 +241,6 @@ async function generateProposalDoc(supabase: any, opts: {
         ? matchedMats.map((m, i) => `[材料${i + 1}] 文件名:${m.material.file_name} | 类型:${m.material.material_type || "未分类"} | 描述:${m.material.content_description || "无"} | AI提取:${JSON.stringify((m.material.ai_extracted_info as any)?.summary || "无")} | 匹配度:${(m.score * 100).toFixed(0)}%`).join("\n")
         : "无匹配材料";
 
-      // TOC detail for this section
       const tocDetail = tocForRoot.length > 0
         ? tocForRoot.map((t: any) => `  ${t.section_number || ""} ${t.title}: ${t.content || "无要求"}`).join("\n")
         : "";
@@ -317,7 +324,6 @@ ${parsedOutline?.overall_strategy ? `【投标策略】${parsedOutline.overall_s
         if (!response.ok) {
           const status = response.status;
           if (status === 429) {
-            // Rate limited - wait and retry once
             await new Promise(r => setTimeout(r, 5000));
             const retry = await fetch(aiUrl, {
               method: "POST",
@@ -343,17 +349,15 @@ ${parsedOutline?.overall_strategy ? `【投标策略】${parsedOutline.overall_s
         generatedContent = `[本章节生成失败: ${fetchErr.message}]\n\n请手动编写或重试。`;
       }
 
-      // Update the root section content
+      // Save content immediately after each section
       await supabase.from("proposal_sections").update({ content: generatedContent }).eq("id", root.id);
 
       completedSections++;
 
-      // Update progress after each section
       await supabase.from("bid_proposals").update({
         proposal_doc_progress: `已完成 ${completedSections}/${totalSectionsToGenerate} 个章节`,
       }).eq("id", proposalId);
 
-      // Small delay between sections to avoid rate limiting
       if (completedSections < totalSectionsToGenerate) {
         await new Promise(r => setTimeout(r, 1500));
       }
