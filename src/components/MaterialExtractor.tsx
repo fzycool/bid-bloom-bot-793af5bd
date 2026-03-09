@@ -357,7 +357,13 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
       setProgress({ current: i + 1, total: sel.length });
       try {
         const blob = await buildChapterDocx(zipRef.current!, parsedRef.current!, ch.startChunk, ch.endChunk);
-        const storagePath = `${user.id}/${Date.now()}_chapter_${i}.docx`;
+        // Sanitize chapter title for storage path (remove invalid characters)
+        const sanitizedTitle = ch.title
+          .replace(/[\/\\:*?"<>|]/g, "_")  // Replace invalid path characters
+          .replace(/\s+/g, "_")             // Replace spaces with underscores
+          .substring(0, 100);               // Limit length
+        const chapterFileName = `${ch.section_number}_${sanitizedTitle}`;
+        const storagePath = `${user.id}/${Date.now()}_${chapterFileName}.docx`;
         const { error: upErr } = await supabase.storage
           .from("company-materials")
           .upload(storagePath, blob, {
@@ -367,7 +373,7 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
 
         await supabase.from("company_materials").insert({
           user_id: user.id,
-          file_name: `${prefix}${ch.title}.docx`,
+          file_name: `${prefix}${ch.section_number} ${ch.title}.docx`,
           file_path: storagePath,
           file_size: blob.size,
           file_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
