@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,7 +32,16 @@ serve(async (req) => {
     }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
+    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const aiModel = modelConfig?.model_name || "google/gemini-2.5-flash";
+    const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
+    const isLovable = !modelConfig || modelConfig.provider === "lovable";
+    if (!aiKey) throw new Error("No AI API key configured");
 
     // Build compact outline tree text
     const buildOutline = (nodes: any[], depth = 0): string => {
@@ -87,19 +97,7 @@ ${itemsText}
     const timer = setTimeout(() => controller.abort(), 60000);
 
     try {
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          tools: [
+      const toolsDef = [
             {
               type: "function",
               function: {
@@ -120,6 +118,7 @@ ${itemsText}
                           sort_order: { type: "integer", description: "排序序号" },
                         },
                         required: ["item_id", "item_type", "parent_section_id", "sort_order"],
+                        ...(isLovable ? { additionalProperties: false } : {}),
                       },
                     },
                     duplicates: {
@@ -133,16 +132,38 @@ ${itemsText}
                           reason: { type: "string", description: "重复原因" },
                         },
                         required: ["item_id", "item_type"],
+                        ...(isLovable ? { additionalProperties: false } : {}),
                       },
                     },
                   },
                   required: ["assignments", "duplicates"],
+                  ...(isLovable ? { additionalProperties: false } : {}),
                 },
               },
             },
-          ],
-          tool_choice: { type: "function", function: { name: "organize_toc" } },
-        }),
+          ];
+
+      const requestBody: any = {
+        model: aiModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        tools: toolsDef,
+      };
+      if (isLovable) {
+        requestBody.tool_choice = { type: "function", function: { name: "organize_toc" } };
+      } else {
+        requestBody.tool_choice = "auto";
+      }
+
+      const response = await fetch(aiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
