@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,14 +22,13 @@ const STRUCTURE_TOOLS = [{
           items: {
             type: "object",
             properties: {
-              number: { type: "string", description: "章节编号，如 '第一章'、'1.1'、'（二）'" },
+              number: { type: "string", description: "章节编号" },
               title: { type: "string", description: "章节标题" },
-              page_hint: { type: "string", description: "大致页码或位置提示" },
-              importance: { type: "string", enum: ["critical", "high", "medium", "low"], description: "对投标的重要程度" },
-              importance_reason: { type: "string", description: "为什么重要（简要说明）" },
+              page_hint: { type: "string", description: "大致页码" },
+              importance: { type: "string", enum: ["critical", "high", "medium", "low"] },
+              importance_reason: { type: "string" },
               children: {
                 type: "array",
-                description: "子章节",
                 items: {
                   type: "object",
                   properties: {
@@ -57,15 +55,12 @@ const STRUCTURE_TOOLS = [{
 function repairAndParseJson(raw: string): any {
   let s = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try { return JSON.parse(s); } catch (_) { /* continue */ }
-
   const start = s.indexOf("{");
   if (start === -1) throw new Error("No JSON object found");
   s = s.substring(start);
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ");
   s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
   try { return JSON.parse(s); } catch (_) { /* continue */ }
-
-  // Fix unterminated strings
   let inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
@@ -74,12 +69,9 @@ function repairAndParseJson(raw: string): any {
     if (c === '"') inStr = !inStr;
   }
   if (inStr) s += '"';
-
   s = s.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
   s = s.replace(/,\s*\{[^}]*$/, "");
   s = s.replace(/,\s*$/, "");
-
-  // Balance braces/brackets
   let braces = 0, brackets = 0;
   inStr = false; esc = false;
   for (let i = 0; i < s.length; i++) {
@@ -95,8 +87,6 @@ function repairAndParseJson(raw: string): any {
   if (braces > 0) s += '}'.repeat(braces);
   s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
   try { return JSON.parse(s); } catch (_) { /* continue */ }
-
-  // Aggressive truncation
   for (let i = s.length - 1; i > 0; i--) {
     if (s[i] === '}' || s[i] === ']') {
       let attempt = s.substring(0, i + 1);
@@ -125,73 +115,65 @@ async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
   if (uint8.length < 4 || uint8[0] !== 0x50 || uint8[1] !== 0x4B) {
     throw new Error("NOT_DOCX");
   }
-
-  // Parse ZIP manually to find word/document.xml
   let offset = 0;
-  const entries: { name: string; compressedData: Uint8Array; compressionMethod: number }[] = [];
-
   while (offset < uint8.length - 4) {
-    // Local file header signature
     if (uint8[offset] !== 0x50 || uint8[offset + 1] !== 0x4B || uint8[offset + 2] !== 0x03 || uint8[offset + 3] !== 0x04) break;
-
     const compressionMethod = uint8[offset + 8] | (uint8[offset + 9] << 8);
     const compressedSize = uint8[offset + 18] | (uint8[offset + 19] << 8) | (uint8[offset + 20] << 16) | (uint8[offset + 21] << 24);
     const nameLen = uint8[offset + 26] | (uint8[offset + 27] << 8);
     const extraLen = uint8[offset + 28] | (uint8[offset + 29] << 8);
     const name = new TextDecoder().decode(uint8.slice(offset + 30, offset + 30 + nameLen));
     const dataStart = offset + 30 + nameLen + extraLen;
-    const compressedData = uint8.slice(dataStart, dataStart + compressedSize);
-
     if (name === "word/document.xml") {
-      entries.push({ name, compressedData, compressionMethod });
-      break; // We only need this file
+      const compressedData = uint8.slice(dataStart, dataStart + compressedSize);
+      let xmlBytes: Uint8Array;
+      if (compressionMethod === 0) {
+        xmlBytes = compressedData;
+      } else {
+        const ds = new DecompressionStream("deflate-raw");
+        const writer = ds.writable.getWriter();
+        writer.write(compressedData);
+        writer.close();
+        const reader = ds.readable.getReader();
+        const chunks: Uint8Array[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        const totalLen = chunks.reduce((a, c) => a + c.length, 0);
+        xmlBytes = new Uint8Array(totalLen);
+        let pos = 0;
+        for (const c of chunks) { xmlBytes.set(c, pos); pos += c.length; }
+      }
+      const xmlStr = new TextDecoder().decode(xmlBytes);
+      return xmlStr
+        .replace(/<w:p[^>]*>/g, "\n")
+        .replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1")
+        .replace(/<[^>]+>/g, "")
+        .trim();
     }
     offset = dataStart + compressedSize;
   }
+  return "";
+}
 
-  if (entries.length === 0) return "";
-
-  const entry = entries[0];
-  let xmlBytes: Uint8Array;
-
-  if (entry.compressionMethod === 0) {
-    xmlBytes = entry.compressedData;
-  } else {
-    // Deflate - use DecompressionStream
-    const ds = new DecompressionStream("deflate-raw");
-    const writer = ds.writable.getWriter();
-    writer.write(entry.compressedData);
-    writer.close();
-    const reader = ds.readable.getReader();
-    const chunks: Uint8Array[] = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const totalLen = chunks.reduce((a, c) => a + c.length, 0);
-    xmlBytes = new Uint8Array(totalLen);
-    let pos = 0;
-    for (const c of chunks) { xmlBytes.set(c, pos); pos += c.length; }
+/** Convert Uint8Array to base64 in chunks to avoid stack overflow */
+function uint8ToBase64(uint8: Uint8Array): string {
+  const CHUNK = 8192;
+  let result = "";
+  for (let i = 0; i < uint8.length; i += CHUNK) {
+    const slice = uint8.subarray(i, Math.min(i + CHUNK, uint8.length));
+    result += String.fromCharCode(...slice);
   }
-
-  const xmlStr = new TextDecoder().decode(xmlBytes);
-  const text = xmlStr
-    .replace(/<w:p[^>]*>/g, "\n")
-    .replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1")
-    .replace(/<[^>]+>/g, "");
-  return text.trim();
+  return btoa(result);
 }
 
 const SYSTEM_PROMPT = `你是一位资深招投标专家。请分析以下招标文件，提取其整体结构（章节目录树）。
 
 要求：
 1. 识别文档的所有主要章节和子章节，构建完整的目录结构
-2. 为每个章节标注对投标方的重要程度（critical/high/medium/low）：
-   - critical: 直接影响废标或重大失分的章节（如评分标准、废标条款、资格要求）
-   - high: 投标方案核心内容章节（如技术要求、商务要求、人员配置）
-   - medium: 需要关注但非核心的章节（如合同条款、付款方式）
-   - low: 一般性信息章节（如项目背景、名词解释）
+2. 为每个章节标注对投标方的重要程度（critical/high/medium/low）
 3. 简要说明每个章节为什么重要
 4. 给出文档整体概述
 
@@ -226,195 +208,192 @@ serve(async (req) => {
       });
     }
 
-    await supabase.from("bid_analyses").update({ ai_status: "analyzing_structure" }).eq("id", analysisId);
+    // Update status and start background processing
+    await supabase.from("bid_analyses").update({ ai_status: "analyzing_structure", ai_progress: "正在准备文档..." } as any).eq("id", analysisId);
 
-    const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
+    // Background processing function
+    const processInBackground = async () => {
+      try {
+        const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }];
 
-    if (filePath) {
-      const { data: fileData, error: dlError } = await supabase.storage
-        .from("knowledge-base")
-        .download(filePath);
-      if (dlError || !fileData) {
-        await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-        throw new Error(`文件下载失败: ${dlError?.message || "unknown"}`);
-      }
-
-      const arrayBuffer = await fileData.arrayBuffer();
-      const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
-      const isExcel = filePath.endsWith(".xlsx") || filePath.endsWith(".xls") || fileType?.includes("spreadsheet") || fileType?.includes("excel");
-      const isDocx = filePath.endsWith(".docx") || fileType?.includes("wordprocessingml");
-
-      if (isLovable && (isPdf || isExcel)) {
-        // Send file as base64 directly to Lovable AI (supports PDF and Excel natively)
-        const uint8Array = new Uint8Array(arrayBuffer);
-        const b64 = base64Encode(uint8Array);
-        const fileName = filePath.split("/").pop() || "document";
-        const mimeType = isPdf ? "application/pdf" :
-          filePath.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
-          "application/vnd.ms-excel";
-        messages.push({
-          role: "user",
-          content: [
-            { type: "file", file: { filename: fileName, file_data: `data:${mimeType};base64,${b64}` } },
-            { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
-          ],
-        });
-      } else if (isDocx || isExcel) {
-        // Extract text from DOCX
-        let textContent = "";
-        if (isDocx) {
-          try {
-            textContent = await extractTextFromDocx(arrayBuffer);
-          } catch (e: any) {
-            if (e?.message === "NOT_DOCX") {
-              await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-              throw new Error("该文件不是有效的Word格式，请确认文件格式后重新上传");
-            }
-            throw e;
-          }
-        }
-        if (!textContent) {
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-          throw new Error("无法从文档中提取文本内容，请尝试转换为PDF后重新上传");
-        }
-        const MAX_CHARS = 80000;
-        if (textContent.length > MAX_CHARS) {
-          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
-        }
-        messages.push({
-          role: "user",
-          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${textContent}`,
-        });
-      } else if (isPdf && !isLovable) {
-        // Non-Lovable: try basic text extraction from PDF
-        const uint8Array = new Uint8Array(arrayBuffer);
-        let textContent = "";
-        try {
-          const decoder = new TextDecoder("utf-8", { fatal: false });
-          const raw = decoder.decode(uint8Array);
-          const textParts: string[] = [];
-          const regex = /\(([^)]{1,500})\)/g;
-          let m;
-          while ((m = regex.exec(raw)) !== null) {
-            const t = m[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1");
-            if (t.trim().length > 1) textParts.push(t.trim());
-          }
-          textContent = textParts.join("\n");
-        } catch (_) { /* ignore */ }
-        if (!textContent || textContent.length < 200) {
-          textContent = "[PDF文件无法直接提取文本。请根据文件名和项目名称进行结构分析。]";
-        }
-        const MAX_CHARS = 80000;
-        if (textContent.length > MAX_CHARS) {
-          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
-        }
-        messages.push({
-          role: "user",
-          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
-        });
-      } else {
-        // Fallback: try DOCX extraction
-        let textContent = "";
-        try { textContent = await extractTextFromDocx(arrayBuffer); } catch (_) { /* ignore */ }
-        if (!textContent) {
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-          throw new Error("无法从文档中提取文本，请尝试转换为PDF后重新上传");
-        }
-        const MAX_CHARS = 80000;
-        if (textContent.length > MAX_CHARS) {
-          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
-        }
-        messages.push({
-          role: "user",
-          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
-        });
-      }
-    } else if (content) {
-      messages.push({
-        role: "user",
-        content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${content}`,
-      });
-    } else {
-      throw new Error("请提供文件或文本内容");
-    }
-
-    const requestBody: any = {
-      model: aiModel,
-      messages,
-      tools: sanitizeTools(STRUCTURE_TOOLS),
-      max_tokens: Math.min(configMaxTokens, 8192),
-    };
-    if (isLovable) {
-      requestBody.tool_choice = { type: "function", function: { name: "extract_document_structure" } };
-    } else {
-      requestBody.tool_choice = "auto";
-    }
-
-    // SSE stream to keep connection alive
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const sendEvent = (data: any) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-        };
-
-        try {
-          sendEvent({ type: "progress", message: "正在调用AI模型分析文档结构..." });
-
-          const heartbeat = setInterval(() => {
-            sendEvent({ type: "heartbeat" });
-          }, 15000);
-
-          const response = await fetch(aiUrl, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify(requestBody),
-          });
-
-          clearInterval(heartbeat);
-
-          if (!response.ok) {
-            const status = response.status;
-            const errText = await response.text();
-            console.error("AI gateway error:", status, errText);
-            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `AI返回错误 (${status})` } as any).eq("id", analysisId);
-            sendEvent({ type: "error", message: `AI返回错误 (${status})` });
-            controller.close();
+        if (filePath) {
+          const { data: fileData, error: dlError } = await supabase.storage
+            .from("knowledge-base")
+            .download(filePath);
+          if (dlError || !fileData) {
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `文件下载失败: ${dlError?.message || "unknown"}` } as any).eq("id", analysisId);
             return;
           }
 
-          sendEvent({ type: "progress", message: "AI已返回结果，正在解析结构数据..." });
+          const arrayBuffer = await fileData.arrayBuffer();
+          const fileSize = arrayBuffer.byteLength;
+          const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
+          const isExcel = filePath.endsWith(".xlsx") || filePath.endsWith(".xls") || fileType?.includes("spreadsheet") || fileType?.includes("excel");
+          const isDocx = filePath.endsWith(".docx") || fileType?.includes("wordprocessingml");
 
-          const data = await response.json();
-          const usage = data.usage || null;
-          const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-
-          if (toolCall?.function?.arguments) {
-            const result = repairAndParseJson(toolCall.function.arguments);
-            const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
-            await supabase.from("bid_analyses").update({
-              document_structure: result,
-              ai_status: "structure_ready",
-              ai_progress: "结构分析完成",
-              token_usage: tokenData,
-            } as any).eq("id", analysisId);
-            sendEvent({ type: "complete", status: "structure_ready" });
-          } else {
-            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "AI未返回有效结构数据" } as any).eq("id", analysisId);
-            sendEvent({ type: "error", message: "AI未返回有效结构数据" });
+          // Reject files over 10MB to prevent memory issues
+          if (fileSize > 10 * 1024 * 1024) {
+            await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "文件过大（超过10MB），请尝试压缩或拆分文件后重新上传" } as any).eq("id", analysisId);
+            return;
           }
-        } catch (e) {
-          console.error("parse-bid-structure stream error:", e);
-          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `结构分析出错: ${e instanceof Error ? e.message : "未知错误"}` } as any).eq("id", analysisId);
-          sendEvent({ type: "error", message: e instanceof Error ? e.message : "未知错误" });
-        } finally {
-          controller.close();
-        }
-      },
-    });
 
-    return new Response(stream, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" },
+          if (isLovable && (isPdf || isExcel)) {
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const b64 = uint8ToBase64(uint8Array);
+            const fileName = filePath.split("/").pop() || "document";
+            const mimeType = isPdf ? "application/pdf" :
+              filePath.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+              "application/vnd.ms-excel";
+            messages.push({
+              role: "user",
+              content: [
+                { type: "file", file: { filename: fileName, file_data: `data:${mimeType};base64,${b64}` } },
+                { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
+              ],
+            });
+          } else if (isDocx) {
+            let textContent = "";
+            try {
+              textContent = await extractTextFromDocx(arrayBuffer);
+            } catch (e: any) {
+              if (e?.message === "NOT_DOCX") {
+                await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "该文件不是有效的Word格式" } as any).eq("id", analysisId);
+                return;
+              }
+              throw e;
+            }
+            if (!textContent) {
+              await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "无法从文档中提取文本内容，请尝试转换为PDF后重新上传" } as any).eq("id", analysisId);
+              return;
+            }
+            const MAX_CHARS = 60000;
+            if (textContent.length > MAX_CHARS) {
+              textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+            }
+            messages.push({
+              role: "user",
+              content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
+            });
+          } else if (isPdf && !isLovable) {
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let textContent = "";
+            try {
+              const decoder = new TextDecoder("utf-8", { fatal: false });
+              const raw = decoder.decode(uint8Array);
+              const textParts: string[] = [];
+              const regex = /\(([^)]{1,500})\)/g;
+              let m;
+              while ((m = regex.exec(raw)) !== null) {
+                const t = m[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1");
+                if (t.trim().length > 1) textParts.push(t.trim());
+              }
+              textContent = textParts.join("\n");
+            } catch (_) { /* ignore */ }
+            if (!textContent || textContent.length < 200) {
+              textContent = "[PDF文件无法直接提取文本。请根据文件名和项目名称进行结构分析。]";
+            }
+            const MAX_CHARS = 60000;
+            if (textContent.length > MAX_CHARS) {
+              textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+            }
+            messages.push({
+              role: "user",
+              content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
+            });
+          } else {
+            let textContent = "";
+            try { textContent = await extractTextFromDocx(arrayBuffer); } catch (_) { /* ignore */ }
+            if (!textContent) {
+              await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "无法从文档中提取文本，请尝试转换为PDF后重新上传" } as any).eq("id", analysisId);
+              return;
+            }
+            const MAX_CHARS = 60000;
+            if (textContent.length > MAX_CHARS) {
+              textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+            }
+            messages.push({
+              role: "user",
+              content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
+            });
+          }
+        } else if (content) {
+          const MAX_CHARS = 60000;
+          let textContent = content;
+          if (textContent.length > MAX_CHARS) {
+            textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 内容过长，已截断 ...]";
+          }
+          messages.push({
+            role: "user",
+            content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
+          });
+        } else {
+          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "请提供文件或文本内容" } as any).eq("id", analysisId);
+          return;
+        }
+
+        await supabase.from("bid_analyses").update({ ai_progress: "正在调用AI模型分析文档结构..." } as any).eq("id", analysisId);
+
+        const requestBody: any = {
+          model: aiModel,
+          messages,
+          tools: sanitizeTools(STRUCTURE_TOOLS),
+          max_tokens: Math.min(configMaxTokens, 8192),
+        };
+        if (isLovable) {
+          requestBody.tool_choice = { type: "function", function: { name: "extract_document_structure" } };
+        } else {
+          requestBody.tool_choice = "auto";
+        }
+
+        const response = await fetch(aiUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          const status = response.status;
+          const errText = await response.text();
+          console.error("AI gateway error:", status, errText);
+          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `AI返回错误 (${status})` } as any).eq("id", analysisId);
+          return;
+        }
+
+        const data = await response.json();
+        const usage = data.usage || null;
+        const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+
+        if (toolCall?.function?.arguments) {
+          const result = repairAndParseJson(toolCall.function.arguments);
+          const tokenData = usage ? { prompt_tokens: usage.prompt_tokens || 0, completion_tokens: usage.completion_tokens || 0, total_tokens: usage.total_tokens || 0 } : null;
+          await supabase.from("bid_analyses").update({
+            document_structure: result,
+            ai_status: "structure_ready",
+            ai_progress: "结构分析完成",
+            token_usage: tokenData,
+          } as any).eq("id", analysisId);
+        } else {
+          await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: "AI未返回有效结构数据" } as any).eq("id", analysisId);
+        }
+      } catch (e) {
+        console.error("parse-bid-structure background error:", e);
+        await supabase.from("bid_analyses").update({ ai_status: "failed", ai_progress: `结构分析出错: ${e instanceof Error ? e.message : "未知错误"}` } as any).eq("id", analysisId);
+      }
+    };
+
+    // Use EdgeRuntime.waitUntil for background processing
+    // @ts-ignore - EdgeRuntime is available in Supabase edge functions
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(processInBackground());
+    } else {
+      // Fallback: run in background with no await
+      processInBackground().catch(console.error);
+    }
+
+    // Return immediately
+    return new Response(JSON.stringify({ status: "processing", analysisId }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("parse-bid-structure error:", e);
