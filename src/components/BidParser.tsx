@@ -116,30 +116,37 @@ export default function BidParser() {
       const errText = await resp.text();
       throw new Error(errText || `HTTP ${resp.status}`);
     }
-    // Read SSE stream
-    const reader = resp.body?.getReader();
-    if (!reader) return;
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "progress" && onProgress) {
-              onProgress(evt.message);
-            } else if (evt.type === "error") {
-              // Don't throw - let polling detect final status
-              if (onProgress) onProgress(evt.message);
-            }
-          } catch { /* ignore parse errors */ }
+    // Check content type - handle both SSE streams and JSON responses
+    const contentType = resp.headers.get("content-type") || "";
+    if (contentType.includes("text/event-stream")) {
+      // Read SSE stream
+      const reader = resp.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === "progress" && onProgress) {
+                onProgress(evt.message);
+              } else if (evt.type === "error") {
+                if (onProgress) onProgress(evt.message);
+              }
+            } catch { /* ignore parse errors */ }
+          }
         }
       }
+    } else {
+      // JSON response - background processing, just consume body
+      const text = await resp.text();
+      if (onProgress) onProgress("后台处理中，请稍候...");
     }
   };
 
