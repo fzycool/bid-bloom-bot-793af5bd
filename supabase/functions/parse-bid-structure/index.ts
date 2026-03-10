@@ -1,58 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { unzipSync } from "npm:fflate@0.8.2";
-import * as XLSX from "npm:xlsx@0.18.5";
-import { Buffer } from "node:buffer";
-import WordExtractor from "npm:word-extractor@1.0.4";
-
-// Polyfill Buffer globally for npm packages that depend on it
-if (typeof globalThis.Buffer === "undefined") {
-  (globalThis as any).Buffer = Buffer;
-}
-
-function extractTextFromDocx(arrayBuffer: ArrayBuffer): string {
-  const uint8 = new Uint8Array(arrayBuffer);
-  // Verify ZIP magic bytes (DOCX is a ZIP archive)
-  if (uint8.length < 4 || uint8[0] !== 0x50 || uint8[1] !== 0x4B) {
-    throw new Error("NOT_DOCX");
-  }
-  const unzipped = unzipSync(uint8);
-  const docXml = unzipped["word/document.xml"];
-  if (!docXml) return "";
-  const xmlStr = new TextDecoder().decode(docXml);
-  const text = xmlStr.replace(/<w:p[^>]*>/g, "\n").replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1").replace(/<[^>]+>/g, "");
-  return text.trim();
-}
-
-async function extractTextFromOldDoc(arrayBuffer: ArrayBuffer): Promise<string> {
-  const uint8 = new Uint8Array(arrayBuffer);
-  // Check OLE2/CFB magic bytes: D0 CF 11 E0
-  if (uint8.length < 8 || uint8[0] !== 0xD0 || uint8[1] !== 0xCF || uint8[2] !== 0x11 || uint8[3] !== 0xE0) {
-    throw new Error("NOT_DOC");
-  }
-  const extractor = new WordExtractor();
-  const doc = await extractor.extract(Buffer.from(uint8));
-  return doc.getBody()?.trim() || "";
-}
-
-function isOldDocFormat(arrayBuffer: ArrayBuffer): boolean {
-  const uint8 = new Uint8Array(arrayBuffer);
-  return uint8.length >= 8 && uint8[0] === 0xD0 && uint8[1] === 0xCF && uint8[2] === 0x11 && uint8[3] === 0xE0;
-}
-
-function extractTextFromExcel(arrayBuffer: ArrayBuffer): string {
-  const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
-  const parts: string[] = [];
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    parts.push(`【Sheet: ${sheetName}】`);
-    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
-    parts.push(csv);
-    parts.push("");
-  }
-  return parts.join("\n").trim();
-}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -93,40 +41,31 @@ const STRUCTURE_TOOLS = [{
                     importance_reason: { type: "string" },
                   },
                   required: ["title"],
-                  additionalProperties: false,
                 },
               },
             },
             required: ["title", "importance"],
-            additionalProperties: false,
           },
         },
         summary: { type: "string", description: "文档整体概述（100字以内）" },
       },
       required: ["document_title", "sections", "summary"],
-      additionalProperties: false,
     },
   },
 }];
 
 function repairAndParseJson(raw: string): any {
-  // Strip markdown fences
   let s = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-  // Try direct parse first
   try { return JSON.parse(s); } catch (_) { /* continue */ }
 
-  // Find JSON boundaries
   const start = s.indexOf("{");
   if (start === -1) throw new Error("No JSON object found");
   s = s.substring(start);
-
-  // Remove control chars
   s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ");
   s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
   try { return JSON.parse(s); } catch (_) { /* continue */ }
 
-  // Check if string is unterminated
+  // Fix unterminated strings
   let inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
@@ -136,12 +75,11 @@ function repairAndParseJson(raw: string): any {
   }
   if (inStr) s += '"';
 
-  // Remove trailing incomplete property/array item
   s = s.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "");
   s = s.replace(/,\s*\{[^}]*$/, "");
   s = s.replace(/,\s*$/, "");
 
-  // Balance braces and brackets
+  // Balance braces/brackets
   let braces = 0, brackets = 0;
   inStr = false; esc = false;
   for (let i = 0; i < s.length; i++) {
@@ -150,25 +88,20 @@ function repairAndParseJson(raw: string): any {
     if (c === '\\' && inStr) { esc = true; continue; }
     if (c === '"') { inStr = !inStr; continue; }
     if (inStr) continue;
-    if (c === '{') braces++;
-    else if (c === '}') braces--;
-    else if (c === '[') brackets++;
-    else if (c === ']') brackets--;
+    if (c === '{') braces++; else if (c === '}') braces--;
+    if (c === '[') brackets++; else if (c === ']') brackets--;
   }
-
   if (brackets > 0) s += ']'.repeat(brackets);
   if (braces > 0) s += '}'.repeat(braces);
   s = s.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
-
   try { return JSON.parse(s); } catch (_) { /* continue */ }
 
-  // Aggressive: find last valid closing brace/bracket and truncate
+  // Aggressive truncation
   for (let i = s.length - 1; i > 0; i--) {
     if (s[i] === '}' || s[i] === ']') {
       let attempt = s.substring(0, i + 1);
       attempt = attempt.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
-      let b = 0, k = 0;
-      let is2 = false, e2 = false;
+      let b = 0, k = 0, is2 = false, e2 = false;
       for (const ch of attempt) {
         if (e2) { e2 = false; continue; }
         if (ch === '\\' && is2) { e2 = true; continue; }
@@ -183,9 +116,71 @@ function repairAndParseJson(raw: string): any {
       try { return JSON.parse(attempt); } catch (_) { continue; }
     }
   }
-
-  console.error("JSON repair failed, raw length:", raw.length);
   throw new Error("AI返回的数据格式异常，请重试");
+}
+
+/** Lightweight DOCX text extraction using built-in DecompressionStream */
+async function extractTextFromDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+  const uint8 = new Uint8Array(arrayBuffer);
+  if (uint8.length < 4 || uint8[0] !== 0x50 || uint8[1] !== 0x4B) {
+    throw new Error("NOT_DOCX");
+  }
+
+  // Parse ZIP manually to find word/document.xml
+  let offset = 0;
+  const entries: { name: string; compressedData: Uint8Array; compressionMethod: number }[] = [];
+
+  while (offset < uint8.length - 4) {
+    // Local file header signature
+    if (uint8[offset] !== 0x50 || uint8[offset + 1] !== 0x4B || uint8[offset + 2] !== 0x03 || uint8[offset + 3] !== 0x04) break;
+
+    const compressionMethod = uint8[offset + 8] | (uint8[offset + 9] << 8);
+    const compressedSize = uint8[offset + 18] | (uint8[offset + 19] << 8) | (uint8[offset + 20] << 16) | (uint8[offset + 21] << 24);
+    const nameLen = uint8[offset + 26] | (uint8[offset + 27] << 8);
+    const extraLen = uint8[offset + 28] | (uint8[offset + 29] << 8);
+    const name = new TextDecoder().decode(uint8.slice(offset + 30, offset + 30 + nameLen));
+    const dataStart = offset + 30 + nameLen + extraLen;
+    const compressedData = uint8.slice(dataStart, dataStart + compressedSize);
+
+    if (name === "word/document.xml") {
+      entries.push({ name, compressedData, compressionMethod });
+      break; // We only need this file
+    }
+    offset = dataStart + compressedSize;
+  }
+
+  if (entries.length === 0) return "";
+
+  const entry = entries[0];
+  let xmlBytes: Uint8Array;
+
+  if (entry.compressionMethod === 0) {
+    xmlBytes = entry.compressedData;
+  } else {
+    // Deflate - use DecompressionStream
+    const ds = new DecompressionStream("deflate-raw");
+    const writer = ds.writable.getWriter();
+    writer.write(entry.compressedData);
+    writer.close();
+    const reader = ds.readable.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const totalLen = chunks.reduce((a, c) => a + c.length, 0);
+    xmlBytes = new Uint8Array(totalLen);
+    let pos = 0;
+    for (const c of chunks) { xmlBytes.set(c, pos); pos += c.length; }
+  }
+
+  const xmlStr = new TextDecoder().decode(xmlBytes);
+  const text = xmlStr
+    .replace(/<w:p[^>]*>/g, "\n")
+    .replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1")
+    .replace(/<[^>]+>/g, "");
+  return text.trim();
 }
 
 const SYSTEM_PROMPT = `你是一位资深招投标专家。请分析以下招标文件，提取其整体结构（章节目录树）。
@@ -247,80 +242,35 @@ serve(async (req) => {
       const arrayBuffer = await fileData.arrayBuffer();
       const isPdf = filePath.endsWith(".pdf") || fileType?.includes("pdf");
       const isExcel = filePath.endsWith(".xlsx") || filePath.endsWith(".xls") || fileType?.includes("spreadsheet") || fileType?.includes("excel");
+      const isDocx = filePath.endsWith(".docx") || fileType?.includes("wordprocessingml");
 
-      if (isExcel) {
-        let textContent = extractTextFromExcel(arrayBuffer);
-        if (!textContent) {
-          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-          throw new Error("无法从Excel文件中提取内容");
-        }
-        const MAX_CHARS = 80000;
-        if (textContent.length > MAX_CHARS) {
-          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
-        }
+      if (isLovable && (isPdf || isExcel)) {
+        // Send file as base64 directly to Lovable AI (supports PDF and Excel natively)
+        const uint8Array = new Uint8Array(arrayBuffer);
+        const b64 = base64Encode(uint8Array);
+        const fileName = filePath.split("/").pop() || "document";
+        const mimeType = isPdf ? "application/pdf" :
+          filePath.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+          "application/vnd.ms-excel";
         messages.push({
           role: "user",
-          content: `项目名称: ${projectName || "未知"}\n\n请分析以下从Excel招标文件中提取的内容，提取完整的章节目录树：\n\n${textContent}`,
+          content: [
+            { type: "file", file: { filename: fileName, file_data: `data:${mimeType};base64,${b64}` } },
+            { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
+          ],
         });
-      } else if (isPdf) {
-        if (isLovable) {
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const b64 = base64Encode(uint8Array);
-          const fileName = filePath.split("/").pop() || "document.pdf";
-          messages.push({
-            role: "user",
-            content: [
-              { type: "file", file: { filename: fileName, file_data: `data:application/pdf;base64,${b64}` } },
-              { type: "text", text: `项目名称: ${projectName || "未知"}\n\n请分析上传的招标文件的整体结构，提取完整的章节目录树。` },
-            ],
-          });
-        } else {
-          const uint8Array = new Uint8Array(arrayBuffer);
-          let textContent = "";
-          try {
-            const decoder = new TextDecoder("utf-8", { fatal: false });
-            const raw = decoder.decode(uint8Array);
-            const textParts: string[] = [];
-            const regex = /\(([^)]{1,500})\)/g;
-            let m;
-            while ((m = regex.exec(raw)) !== null) {
-              const t = m[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1");
-              if (t.trim().length > 1) textParts.push(t.trim());
-            }
-            textContent = textParts.join("\n");
-          } catch (_) { /* ignore */ }
-          
-          if (!textContent || textContent.length < 200) {
-            textContent = "[PDF文件无法直接提取文本。请根据文件名和项目名称进行结构分析。]";
-          }
-          const MAX_CHARS = 80000;
-          if (textContent.length > MAX_CHARS) {
-            textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
-          }
-          messages.push({
-            role: "user",
-            content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${textContent}`,
-          });
-        }
-      } else {
+      } else if (isDocx || isExcel) {
+        // Extract text from DOCX
         let textContent = "";
-        if (isOldDocFormat(arrayBuffer)) {
+        if (isDocx) {
           try {
-            textContent = await extractTextFromOldDoc(arrayBuffer);
-          } catch (docErr: any) {
-            console.error("Old .doc extraction failed:", docErr);
-            await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
-            throw new Error("无法从.doc文件中提取内容，请尝试用Word另存为.docx或PDF后重新上传");
-          }
-        } else {
-          try {
-            textContent = extractTextFromDocx(arrayBuffer);
-          } catch (docxErr: any) {
-            if (docxErr?.message === "NOT_DOCX") {
+            textContent = await extractTextFromDocx(arrayBuffer);
+          } catch (e: any) {
+            if (e?.message === "NOT_DOCX") {
               await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
               throw new Error("该文件不是有效的Word格式，请确认文件格式后重新上传");
             }
-            throw docxErr;
+            throw e;
           }
         }
         if (!textContent) {
@@ -334,6 +284,49 @@ serve(async (req) => {
         messages.push({
           role: "user",
           content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构，提取完整的章节目录树：\n\n${textContent}`,
+        });
+      } else if (isPdf && !isLovable) {
+        // Non-Lovable: try basic text extraction from PDF
+        const uint8Array = new Uint8Array(arrayBuffer);
+        let textContent = "";
+        try {
+          const decoder = new TextDecoder("utf-8", { fatal: false });
+          const raw = decoder.decode(uint8Array);
+          const textParts: string[] = [];
+          const regex = /\(([^)]{1,500})\)/g;
+          let m;
+          while ((m = regex.exec(raw)) !== null) {
+            const t = m[1].replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1");
+            if (t.trim().length > 1) textParts.push(t.trim());
+          }
+          textContent = textParts.join("\n");
+        } catch (_) { /* ignore */ }
+        if (!textContent || textContent.length < 200) {
+          textContent = "[PDF文件无法直接提取文本。请根据文件名和项目名称进行结构分析。]";
+        }
+        const MAX_CHARS = 80000;
+        if (textContent.length > MAX_CHARS) {
+          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+        }
+        messages.push({
+          role: "user",
+          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
+        });
+      } else {
+        // Fallback: try DOCX extraction
+        let textContent = "";
+        try { textContent = await extractTextFromDocx(arrayBuffer); } catch (_) { /* ignore */ }
+        if (!textContent) {
+          await supabase.from("bid_analyses").update({ ai_status: "failed" }).eq("id", analysisId);
+          throw new Error("无法从文档中提取文本，请尝试转换为PDF后重新上传");
+        }
+        const MAX_CHARS = 80000;
+        if (textContent.length > MAX_CHARS) {
+          textContent = textContent.substring(0, MAX_CHARS) + "\n\n[... 文档内容过长，已截断 ...]";
+        }
+        messages.push({
+          role: "user",
+          content: `项目名称: ${projectName || "未知"}\n\n请分析以下招标文件的整体结构：\n\n${textContent}`,
         });
       }
     } else if (content) {
@@ -357,7 +350,7 @@ serve(async (req) => {
       requestBody.tool_choice = "auto";
     }
 
-    // Use streaming response to keep HTTP connection alive during AI processing
+    // SSE stream to keep connection alive
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -368,7 +361,6 @@ serve(async (req) => {
         try {
           sendEvent({ type: "progress", message: "正在调用AI模型分析文档结构..." });
 
-          // Set up heartbeat to keep connection alive
           const heartbeat = setInterval(() => {
             sendEvent({ type: "heartbeat" });
           }, 15000);
