@@ -97,19 +97,7 @@ ${itemsText}
     const timer = setTimeout(() => controller.abort(), 60000);
 
     try {
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          tools: [
+      const toolsDef = [
             {
               type: "function",
               function: {
@@ -130,6 +118,7 @@ ${itemsText}
                           sort_order: { type: "integer", description: "排序序号" },
                         },
                         required: ["item_id", "item_type", "parent_section_id", "sort_order"],
+                        ...(isLovable ? { additionalProperties: false } : {}),
                       },
                     },
                     duplicates: {
@@ -143,16 +132,38 @@ ${itemsText}
                           reason: { type: "string", description: "重复原因" },
                         },
                         required: ["item_id", "item_type"],
+                        ...(isLovable ? { additionalProperties: false } : {}),
                       },
                     },
                   },
                   required: ["assignments", "duplicates"],
+                  ...(isLovable ? { additionalProperties: false } : {}),
                 },
               },
             },
-          ],
-          tool_choice: { type: "function", function: { name: "organize_toc" } },
-        }),
+          ];
+
+      const requestBody: any = {
+        model: aiModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        tools: toolsDef,
+      };
+      if (isLovable) {
+        requestBody.tool_choice = { type: "function", function: { name: "organize_toc" } };
+      } else {
+        requestBody.tool_choice = "auto";
+      }
+
+      const response = await fetch(aiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${aiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
