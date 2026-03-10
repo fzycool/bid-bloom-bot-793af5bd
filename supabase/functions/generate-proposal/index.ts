@@ -284,6 +284,7 @@ ${bid ? `【项目摘要】${bid.summary || "无"}` : ""}
 ${outlineText}
 【公司材料库匹配结果（优先引用）】
 ${matchedMaterialsInfo}
+${materialFullContents ? `【公司材料原文内容（请原样移植，仅替换项目名称）】\n${materialFullContents}` : ""}
 【证明材料清单】
 ${materialsSummary || "无"}
 【知识库参考资料（次优先引用）】
