@@ -440,7 +440,11 @@ ${(employees || []).map((e: any) => `- ${e.name}: ${e.current_position || "æœªçŸ
       { role: "user", content: userContent },
     ],
   };
-  requestBody.max_tokens = maxTokens;
+  if (aiModel.startsWith("openai/") || aiModel.includes("gpt-")) {
+    requestBody.max_completion_tokens = maxTokens;
+  } else {
+    requestBody.max_tokens = maxTokens;
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 180000); // 3 min timeout
