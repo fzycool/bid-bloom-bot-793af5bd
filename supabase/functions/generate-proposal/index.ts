@@ -195,9 +195,41 @@ async function generateOneSection(supabase: any, opts: {
   matchedMats.sort((a, b) => b.score - a.score);
   const topMats = matchedMats.slice(0, 3);
 
+  // Download actual file content for top matched materials
+  const materialContents: { fileName: string; content: string; score: number }[] = [];
+  for (const m of topMats) {
+    try {
+      const filePath = m.material.file_path;
+      if (!filePath) continue;
+      const { data: fileData, error: dlErr } = await supabase.storage
+        .from("company-materials")
+        .download(filePath);
+      if (dlErr || !fileData) {
+        console.error(`Failed to download material ${filePath}:`, dlErr);
+        continue;
+      }
+      let textContent = "";
+      const fileName = m.material.file_name || "";
+      if (fileName.endsWith(".docx") || fileName.endsWith(".DOCX")) {
+        textContent = await extractDocxText(fileData);
+      } else {
+        textContent = await fileData.text();
+      }
+      if (textContent && textContent.trim().length > 20) {
+        materialContents.push({ fileName: m.material.file_name, content: textContent.trim(), score: m.score });
+      }
+    } catch (e) {
+      console.error("Error extracting material content:", e);
+    }
+  }
+
   const matchedMaterialsInfo = topMats.length > 0
     ? topMats.map((m, i) => `[材料${i + 1}] 文件名:${m.material.file_name} | 类型:${m.material.material_type || "未分类"} | 描述:${m.material.content_description || "无"} | AI提取:${JSON.stringify((m.material.ai_extracted_info as any)?.summary || "无")} | 匹配度:${(m.score * 100).toFixed(0)}%`).join("\n")
     : "无匹配材料";
+
+  const materialFullContents = materialContents.length > 0
+    ? materialContents.map((mc, i) => `=== 材料原文${i + 1}: ${mc.fileName} (匹配度:${(mc.score * 100).toFixed(0)}%) ===\n${mc.content.substring(0, 15000)}\n=== 材料原文${i + 1}结束 ===`).join("\n\n")
+    : "";
 
   const tocDetail = tocForRoot.length > 0
     ? tocForRoot.map((t: any) => `  ${t.section_number || ""} ${t.title}: ${t.content || "无要求"}`).join("\n")
@@ -214,27 +246,33 @@ async function generateOneSection(supabase: any, opts: {
 4. 即使某个子章节找不到任何参考资料，也必须按照提纲要求撰写该子章节内容（由AI根据专业知识补充）
 5. 输出格式：每个子章节以其编号和标题作为小标题，然后撰写正文内容
 
-公司材料引用规则：
-6. **最优先引用公司材料库中的匹配材料**：如果提供了匹配的公司材料信息，优先基于这些材料的内容描述和AI提取信息来撰写，确保与公司实际资质和能力一致
-7. 引用公司材料时在段落末尾标注：【来源：公司材料库 - {文件名}】
+★★★ 材料原文移植规则（最高优先级）★★★：
+6. **如果提供了"材料原文"内容，必须将原文内容原样移植到对应章节中**，保留原文的段落结构、层次格式、编号方式、表格描述等所有格式细节
+7. 移植时仅做以下替换：将原文中出现的**原项目名称**自动替换为当前项目名称"${proposal.project_name}"，其他内容严禁修改
+8. 如果材料原文中包含的内容与当前章节主题高度匹配，直接使用原文（替换项目名后），不要重新改写或概括
+9. 如果材料原文只覆盖了部分子章节，对已覆盖的子章节使用原文移植，未覆盖的子章节由AI补充撰写
+10. 移植的内容标注：【来源：公司材料库（原样移植） - {文件名}】
+
+公司材料引用规则（无原文时）：
+11. 如果没有材料原文但有材料摘要信息，基于摘要信息撰写，标注：【来源：公司材料库 - {文件名}】
 
 知识库引用规则：
-8. **其次引用知识库**：如果公司材料库无匹配，从知识库资料中查找相关信息撰写
-9. 引用知识库时在段落末尾标注：【来源：知识库 - {文件名} - {相关章节/主题}】
+12. **其次引用知识库**：如果公司材料库无匹配，从知识库资料中查找相关信息撰写
+13. 引用知识库时在段落末尾标注：【来源：知识库 - {文件名} - {相关章节/主题}】
 
 AI补充规则：
-10. 如果以上两者都没有相关资料，由你根据专业知识撰写，标注：【来源：AI智能生成】
-11. 每个段落都必须有来源标注
+14. 如果以上都没有相关资料，由你根据专业知识撰写，标注：【来源：AI智能生成】
+15. 每个段落都必须有来源标注
 
 标书目录要求：
-12. 如果提供了标书目录的详细要求，必须严格按照目录中的书写要求和格式规范来撰写对应内容
+16. 如果提供了标书目录的详细要求，必须严格按照目录中的书写要求和格式规范来撰写对应内容
 
 其他要求：
-13. 内容专业、严谨，符合招投标行业标准
-14. 对于需要证明材料的部分，注明"（详见附件：XXX）"
-15. 每个子章节内容充实，字数不少于200字
-16. 使用规范的公文语言，避免口语化表达
-17. 直接输出正文内容，不要输出JSON格式`;
+17. 内容专业、严谨，符合招投标行业标准
+18. 对于需要证明材料的部分，注明"（详见附件：XXX）"
+19. 每个子章节内容充实，字数不少于200字
+20. 使用规范的公文语言，避免口语化表达
+21. 直接输出正文内容，不要输出JSON格式`;
 
   const userPrompt = `【项目名称】${proposal.project_name}
 【当前章节】${root.section_number || ""} ${root.title}
@@ -246,6 +284,7 @@ ${bid ? `【项目摘要】${bid.summary || "无"}` : ""}
 ${outlineText}
 【公司材料库匹配结果（优先引用）】
 ${matchedMaterialsInfo}
+${materialFullContents ? `【公司材料原文内容（请原样移植，仅替换项目名称）】\n${materialFullContents}` : ""}
 【证明材料清单】
 ${materialsSummary || "无"}
 【知识库参考资料（次优先引用）】
@@ -321,4 +360,81 @@ function computeMatchScore(tocTitle: string, tocContent: string | null, material
     if (tocText.includes(pat) && matText.includes(pat)) matchCount += 3;
   }
   return matchCount / Math.max(keywords.length, 1);
+}
+
+// Lightweight DOCX text extraction
+async function extractDocxText(blob: Blob): Promise<string> {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const uint8 = new Uint8Array(arrayBuffer);
+
+    // Find ZIP local file headers and locate word/document.xml
+    const entries: { name: string; compressedData: Uint8Array; compressionMethod: number }[] = [];
+    let offset = 0;
+    while (offset < uint8.length - 4) {
+      if (uint8[offset] === 0x50 && uint8[offset + 1] === 0x4B && uint8[offset + 2] === 0x03 && uint8[offset + 3] === 0x04) {
+        const compressionMethod = uint8[offset + 8] | (uint8[offset + 9] << 8);
+        const nameLen = uint8[offset + 26] | (uint8[offset + 27] << 8);
+        const extraLen = uint8[offset + 28] | (uint8[offset + 29] << 8);
+        const compressedSize = uint8[offset + 18] | (uint8[offset + 19] << 8) | (uint8[offset + 20] << 16) | (uint8[offset + 21] << 24);
+        const nameStart = offset + 30;
+        const name = new TextDecoder().decode(uint8.slice(nameStart, nameStart + nameLen));
+        const dataStart = nameStart + nameLen + extraLen;
+        if (name === "word/document.xml" && compressedSize > 0) {
+          entries.push({ name, compressedData: uint8.slice(dataStart, dataStart + compressedSize), compressionMethod });
+        }
+        offset = dataStart + compressedSize;
+      } else {
+        offset++;
+      }
+    }
+
+    if (entries.length === 0) return "";
+
+    const entry = entries[0];
+    let xmlText = "";
+    if (entry.compressionMethod === 8) {
+      // Deflate
+      const ds = new DecompressionStream("raw");
+      const writer = ds.writable.getWriter();
+      writer.write(entry.compressedData);
+      writer.close();
+      const reader = ds.readable.getReader();
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+      const merged = new Uint8Array(totalLen);
+      let pos = 0;
+      for (const c of chunks) { merged.set(c, pos); pos += c.length; }
+      xmlText = new TextDecoder().decode(merged);
+    } else {
+      xmlText = new TextDecoder().decode(entry.compressedData);
+    }
+
+    // Extract text from XML, preserving paragraph breaks
+    const paragraphs: string[] = [];
+    const pRegex = /<w:p[\s>][\s\S]*?<\/w:p>/g;
+    let match;
+    while ((match = pRegex.exec(xmlText)) !== null) {
+      const pXml = match[0];
+      // Extract all <w:t> text
+      const texts: string[] = [];
+      const tRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+      let tMatch;
+      while ((tMatch = tRegex.exec(pXml)) !== null) {
+        texts.push(tMatch[1]);
+      }
+      if (texts.length > 0) {
+        paragraphs.push(texts.join(""));
+      }
+    }
+    return paragraphs.join("\n");
+  } catch (e) {
+    console.error("extractDocxText error:", e);
+    return "";
+  }
 }
