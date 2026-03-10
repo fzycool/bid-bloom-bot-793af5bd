@@ -361,3 +361,80 @@ function computeMatchScore(tocTitle: string, tocContent: string | null, material
   }
   return matchCount / Math.max(keywords.length, 1);
 }
+
+// Lightweight DOCX text extraction
+async function extractDocxText(blob: Blob): Promise<string> {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const uint8 = new Uint8Array(arrayBuffer);
+
+    // Find ZIP local file headers and locate word/document.xml
+    const entries: { name: string; compressedData: Uint8Array; compressionMethod: number }[] = [];
+    let offset = 0;
+    while (offset < uint8.length - 4) {
+      if (uint8[offset] === 0x50 && uint8[offset + 1] === 0x4B && uint8[offset + 2] === 0x03 && uint8[offset + 3] === 0x04) {
+        const compressionMethod = uint8[offset + 8] | (uint8[offset + 9] << 8);
+        const nameLen = uint8[offset + 26] | (uint8[offset + 27] << 8);
+        const extraLen = uint8[offset + 28] | (uint8[offset + 29] << 8);
+        const compressedSize = uint8[offset + 18] | (uint8[offset + 19] << 8) | (uint8[offset + 20] << 16) | (uint8[offset + 21] << 24);
+        const nameStart = offset + 30;
+        const name = new TextDecoder().decode(uint8.slice(nameStart, nameStart + nameLen));
+        const dataStart = nameStart + nameLen + extraLen;
+        if (name === "word/document.xml" && compressedSize > 0) {
+          entries.push({ name, compressedData: uint8.slice(dataStart, dataStart + compressedSize), compressionMethod });
+        }
+        offset = dataStart + compressedSize;
+      } else {
+        offset++;
+      }
+    }
+
+    if (entries.length === 0) return "";
+
+    const entry = entries[0];
+    let xmlText = "";
+    if (entry.compressionMethod === 8) {
+      // Deflate
+      const ds = new DecompressionStream("raw");
+      const writer = ds.writable.getWriter();
+      writer.write(entry.compressedData);
+      writer.close();
+      const reader = ds.readable.getReader();
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const totalLen = chunks.reduce((s, c) => s + c.length, 0);
+      const merged = new Uint8Array(totalLen);
+      let pos = 0;
+      for (const c of chunks) { merged.set(c, pos); pos += c.length; }
+      xmlText = new TextDecoder().decode(merged);
+    } else {
+      xmlText = new TextDecoder().decode(entry.compressedData);
+    }
+
+    // Extract text from XML, preserving paragraph breaks
+    const paragraphs: string[] = [];
+    const pRegex = /<w:p[\s>][\s\S]*?<\/w:p>/g;
+    let match;
+    while ((match = pRegex.exec(xmlText)) !== null) {
+      const pXml = match[0];
+      // Extract all <w:t> text
+      const texts: string[] = [];
+      const tRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+      let tMatch;
+      while ((tMatch = tRegex.exec(pXml)) !== null) {
+        texts.push(tMatch[1]);
+      }
+      if (texts.length > 0) {
+        paragraphs.push(texts.join(""));
+      }
+    }
+    return paragraphs.join("\n");
+  } catch (e) {
+    console.error("extractDocxText error:", e);
+    return "";
+  }
+}
