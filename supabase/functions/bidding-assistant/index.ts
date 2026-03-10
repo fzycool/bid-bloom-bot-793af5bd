@@ -505,6 +505,9 @@ ${employeesText}`;
 
   await supabase.from("bid_proposals").update({ ai_progress: "正在调用AI生成提纲..." } as any).eq("id", proposalId);
 
+  // Cap outline generation tokens to avoid truncation and CPU timeout
+  const outlineMaxTokens = Math.min(maxTokens, 16000);
+
   const requestBody: any = {
     model: aiModel,
     messages: [
@@ -513,9 +516,9 @@ ${employeesText}`;
     ],
   };
   if (aiModel.startsWith("openai/") || aiModel.includes("gpt-")) {
-    requestBody.max_completion_tokens = maxTokens;
+    requestBody.max_completion_tokens = outlineMaxTokens;
   } else {
-    requestBody.max_tokens = maxTokens;
+    requestBody.max_tokens = outlineMaxTokens;
   }
 
   const controller = new AbortController();
