@@ -352,8 +352,10 @@ async function callAI(
 
   console.log(`AI [${model}] status=${resp.status}`);
 
-  if (resp.status === 429) throw new Error("Rate limited, please try again later.");
-  if (resp.status === 402) throw new Error("Payment required, please add credits.");
+  if (resp.status === 429 || resp.status === 402) {
+    console.error(`AI [${model}] returned ${resp.status}, skipping to fallback`);
+    return [];
+  }
   if (!resp.ok) {
     const t = await resp.text();
     console.error("AI error:", resp.status, t.substring(0, 300));
@@ -484,6 +486,7 @@ serve(async (req) => {
       },
     ];
 
+    let lovableAIWorked = false;
     const lovableKey = Deno.env.get("LOVABLE_API_KEY");
     if (lovableKey) {
       // Attempt 1: tool_choice with gemini-2.5-pro (best for complex docs)
@@ -516,11 +519,12 @@ serve(async (req) => {
       if (aiChapters.length > chapters.length) {
         console.log(`AI found ${aiChapters.length} chapters (pre-processing: ${chapters.length}), using AI result`);
         chapters = aiChapters;
+        lovableAIWorked = true;
       }
     }
 
-    // ── Step 3: Fallback to custom model_config ──
-    if (!chapters.length) {
+    // ── Step 3: Fallback to custom model_config (when Lovable AI failed or no results) ──
+    if (!lovableAIWorked) {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
       const supabase = createClient(supabaseUrl, serviceKey);
