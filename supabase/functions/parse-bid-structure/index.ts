@@ -333,12 +333,19 @@ serve(async (req) => {
 
         await supabase.from("bid_analyses").update({ ai_progress: "正在调用AI模型分析文档结构..." } as any).eq("id", analysisId);
 
+        const tokenLimit = Math.min(configMaxTokens, 8192);
         const requestBody: any = {
           model: aiModel,
           messages,
           tools: sanitizeTools(STRUCTURE_TOOLS),
-          max_tokens: Math.min(configMaxTokens, 8192),
         };
+        // Some models require max_completion_tokens instead of max_tokens
+        const useMaxCompletionTokens = aiModel.startsWith("openai/") || aiModel.includes("gpt-");
+        if (useMaxCompletionTokens) {
+          requestBody.max_completion_tokens = tokenLimit;
+        } else {
+          requestBody.max_tokens = tokenLimit;
+        }
         if (isLovable) {
           requestBody.tool_choice = { type: "function", function: { name: "extract_document_structure" } };
         } else {
