@@ -94,10 +94,10 @@ function extractChaptersFromBody(fullText: string): Chapter[] {
 function extractTocFromText(fullText: string): Chapter[] {
   const chapters: Chapter[] = [];
 
-  // Find Word-style TOC region (look for "目录" or "目 录" followed by structured entries)
-  let tocIdx = fullText.indexOf("目录");
-  if (tocIdx < 0) tocIdx = fullText.indexOf("目 录");
-  
+  // Find Word-style TOC region - use regex for flexible spacing (目录, 目 录, 目　录, etc.)
+  const tocMatch = fullText.match(/目\s*录/);
+  const tocIdx = tocMatch ? tocMatch.index! : -1;
+
   // If no TOC found, try scanning the full text for chapter heading patterns
   if (tocIdx < 0) {
     return extractChaptersFromBody(fullText);
