@@ -241,12 +241,17 @@ function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
   if (!chapters.length) return [];
 
   const chapterCandidates = chapters.map((ch) => {
-    const seps = [" ", "  ", "\t", "、", ".", " ", ""];
     const fullPatterns: string[] = [];
-    for (const sep of seps) {
-      fullPatterns.push(`${ch.section_number}${sep}${ch.title}`);
+    if (ch.section_number) {
+      const seps = [" ", "  ", "\t", "、", ".", " ", ""];
+      for (const sep of seps) {
+        fullPatterns.push(`${ch.section_number}${sep}${ch.title}`);
+      }
+      fullPatterns.push(`${ch.section_number}\n${ch.title}`);
+    } else {
+      // Unnumbered entry: search by title alone
+      fullPatterns.push(ch.title);
     }
-    fullPatterns.push(`${ch.section_number}\n${ch.title}`);
 
     const fullPositions: number[] = [];
     for (const p of fullPatterns) {
