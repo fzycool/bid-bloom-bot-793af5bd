@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import DashboardOverview from "@/components/DashboardOverview";
+import ExtractionProgressFloat from "@/components/ExtractionProgressFloat";
 import {
   Shield,
   LogOut,
@@ -57,7 +58,6 @@ const Dashboard = () => {
     ...(isAdmin ? [{ id: "admin", label: "后台管理", icon: UserCog }] : []),
   ];
 
-  // Show pending approval screen for unapproved users
   if (isApproved === false && !isAdmin) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 p-6">
@@ -95,7 +95,6 @@ const Dashboard = () => {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <nav className="w-56 border-r border-border bg-card shrink-0 p-3 hidden md:flex md:flex-col">
           <div className="space-y-1 flex-1">
             {modules.map((m) => (
@@ -120,7 +119,6 @@ const Dashboard = () => {
           </div>
         </nav>
 
-        {/* Mobile nav */}
         <div className="md:hidden border-b border-border bg-card px-2 py-2 flex gap-1 overflow-x-auto shrink-0 absolute top-[57px] left-0 right-0 z-10">
           {modules.map((m) => (
             <button
@@ -138,7 +136,6 @@ const Dashboard = () => {
           ))}
         </div>
 
-        {/* Main content */}
         <main className="flex-1 min-h-0 overflow-auto p-6 md:p-8">
           {activeModule === "overview" && <DashboardOverview key={overviewKey} />}
           {activeModule === "knowledge" && <KnowledgeBase />}
@@ -153,6 +150,11 @@ const Dashboard = () => {
           {activeModule === "admin" && isAdmin && <BackendManagement />}
         </main>
       </div>
+
+      {/* Floating progress when extraction runs in background (not on materials page) */}
+      {activeModule !== "materials" && (
+        <ExtractionProgressFloat onNavigateToMaterials={() => setActiveModule("materials")} />
+      )}
     </div>
   );
 };
