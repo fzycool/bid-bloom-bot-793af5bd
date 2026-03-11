@@ -49,7 +49,7 @@ serve(async (req) => {
       body: JSON.stringify({
         model: model_name,
         messages: [
-          { role: "user", content: "请回复"连接成功"四个字" },
+          { role: "user", content: "请回复【连接成功】四个字" },
         ],
         max_tokens: 20,
         temperature: 0,
