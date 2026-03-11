@@ -238,9 +238,45 @@ const ModelManagement = () => {
                 </div>
               </div>
 
-              <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
-                <div>模型: <code className="bg-muted px-1 py-0.5 rounded">{m.model_name}</code></div>
-                <div className="break-all">接口: <code className="bg-muted px-1 py-0.5 rounded">{m.base_url}</code></div>
+              <div className="text-xs text-muted-foreground mb-2 space-y-1.5">
+                {editingFields[m.id] ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="w-16 shrink-0">模型:</span>
+                      <Input
+                        value={editModelNames[m.id] || ""}
+                        onChange={(e) => setEditModelNames((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                        className="text-xs h-7 flex-1"
+                        placeholder="模型名称，如 deepseek-chat"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-16 shrink-0">接口:</span>
+                      <Input
+                        value={editBaseUrls[m.id] || ""}
+                        onChange={(e) => setEditBaseUrls((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                        className="text-xs h-7 flex-1"
+                        placeholder="接口地址，如 https://api.deepseek.com/v1"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1">
+                      模型: <code className="bg-muted px-1 py-0.5 rounded">{editModelNames[m.id] || m.model_name}</code>
+                      {m.provider !== "lovable" && (
+                        <button
+                          onClick={() => setEditingFields((prev) => ({ ...prev, [m.id]: true }))}
+                          className="ml-1 text-muted-foreground hover:text-foreground"
+                          title="编辑模型和接口地址"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="break-all">接口: <code className="bg-muted px-1 py-0.5 rounded">{editBaseUrls[m.id] || m.base_url}</code></div>
+                  </>
+                )}
                 <div className="flex items-center gap-2 mt-1">
                   <span>Max Tokens:</span>
                   <Input
