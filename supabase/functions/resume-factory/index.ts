@@ -763,6 +763,222 @@ ${JSON.stringify(resume.education_history || [], null, 2)}`,
       });
     }
 
+    // ---- ACTION: import-from-chapters (auto-import resumes from bid document chapters) ----
+    if (action === "import-from-chapters") {
+      const { userId, chapters } = params;
+      // chapters: Array<{ section_number: string, title: string, content: string }>
+      if (!userId || !chapters?.length) throw new Error("userId and chapters are required");
+
+      const maxTokens = Math.min(configMaxTokens, 16000);
+
+      const results: Array<{ name: string; action: "created" | "merged"; employeeId: string }> = [];
+
+      for (const chapter of chapters) {
+        const chapterText = (chapter.content || "").substring(0, 8000);
+        if (chapterText.length < 50) continue;
+
+        // Use AI to extract structured employee info
+        const parsePrompt = `你是一位资深HR顾问。请从以下标书章节中提取人员简历信息。
+如果该章节包含多个人员简历，请分别提取每个人的信息。
+如果该章节不是人员简历（而是其他标书内容），请返回 {"resumes": []}。
+
+请以JSON格式返回：
+{
+  "resumes": [
+    {
+      "name": "姓名",
+      "gender": "性别(男/女/null)",
+      "birth_year": 出生年份数字或null,
+      "education": "最高学历",
+      "major": "专业",
+      "current_company": "当前单位",
+      "current_position": "当前职位",
+      "years_of_experience": 工作年限数字或null,
+      "certifications": ["证书1", "证书2"],
+      "skills": ["技能1", "技能2"],
+      "work_experiences": [
+        {"company": "公司", "position": "职位", "start_date": "2020-01", "end_date": "2023-06", "description": "职责描述", "is_current": false}
+      ],
+      "project_experiences": [
+        {"project_name": "项目名", "role": "角色", "start_date": "2021-03", "end_date": "2022-01", "description": "项目描述", "technologies": ["技术1"]}
+      ],
+      "education_history": [
+        {"school": "学校", "degree": "学历", "major": "专业", "start_date": "2012-09", "end_date": "2016-06"}
+      ]
+    }
+  ]
+}
+请严格输出纯JSON，不要包含markdown标记。`;
+
+        const requestBody: any = {
+          model: aiModel,
+          messages: [
+            { role: "system", content: parsePrompt },
+            { role: "user", content: `章节标题：${chapter.section_number} ${chapter.title}\n\n章节内容：\n${chapterText}` },
+          ],
+          temperature: 0.1,
+        };
+        if (aiModel.startsWith("openai/") || aiModel.includes("gpt-")) {
+          requestBody.max_completion_tokens = maxTokens;
+        } else {
+          requestBody.max_tokens = maxTokens;
+        }
+
+        const response = await fetch(aiUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          console.error(`AI error for chapter "${chapter.title}":`, response.status);
+          continue;
+        }
+
+        const data = await response.json();
+        let resultText = data.choices?.[0]?.message?.content || "";
+        resultText = resultText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+
+        let parsed;
+        try {
+          parsed = JSON.parse(resultText);
+        } catch {
+          console.error("Failed to parse AI response for chapter:", chapter.title);
+          continue;
+        }
+
+        const resumes = parsed.resumes || (parsed.name ? [parsed] : []);
+        if (!resumes.length) continue;
+
+        for (const resume of resumes) {
+          if (!resume.name || resume.name.length < 1) continue;
+
+          // Check if employee with same name already exists for this user
+          const { data: existing } = await supabase
+            .from("employees")
+            .select("id, certifications, skills")
+            .eq("user_id", userId)
+            .eq("name", resume.name)
+            .maybeSingle();
+
+          if (existing) {
+            // ── Merge: update employee with new data, combining arrays ──
+            const mergedCerts = [...new Set([
+              ...(existing.certifications || []),
+              ...(resume.certifications || []),
+            ])];
+            const mergedSkills = [...new Set([
+              ...(existing.skills || []),
+              ...(resume.skills || []),
+            ])];
+
+            await supabase.from("employees").update({
+              gender: resume.gender || undefined,
+              birth_year: resume.birth_year || undefined,
+              education: resume.education || undefined,
+              major: resume.major || undefined,
+              current_company: resume.current_company || undefined,
+              current_position: resume.current_position || undefined,
+              years_of_experience: resume.years_of_experience || undefined,
+              certifications: mergedCerts,
+              skills: mergedSkills,
+            }).eq("id", existing.id);
+
+            // Update existing resume version or create new one
+            const { data: existingVersion } = await supabase
+              .from("resume_versions")
+              .select("id, work_experiences, project_experiences, education_history")
+              .eq("employee_id", existing.id)
+              .eq("user_id", userId)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (existingVersion) {
+              // Merge experiences
+              const mergedWork = mergeExperiences(
+                existingVersion.work_experiences || [],
+                resume.work_experiences || [],
+                "company"
+              );
+              const mergedProjects = mergeExperiences(
+                existingVersion.project_experiences || [],
+                resume.project_experiences || [],
+                "project_name"
+              );
+              const mergedEdu = mergeExperiences(
+                existingVersion.education_history || [],
+                resume.education_history || [],
+                "school"
+              );
+
+              await supabase.from("resume_versions").update({
+                work_experiences: mergedWork,
+                project_experiences: mergedProjects,
+                education_history: mergedEdu,
+                content: chapterText,
+                ai_status: "completed",
+              }).eq("id", existingVersion.id);
+            } else {
+              await supabase.from("resume_versions").insert({
+                employee_id: existing.id,
+                user_id: userId,
+                version_name: "标书导入版",
+                content: chapterText,
+                work_experiences: resume.work_experiences || [],
+                project_experiences: resume.project_experiences || [],
+                education_history: resume.education_history || [],
+                ai_status: "completed",
+              });
+            }
+
+            results.push({ name: resume.name, action: "merged", employeeId: existing.id });
+          } else {
+            // ── Create new employee + resume version ──
+            const { data: newEmp, error: empErr } = await supabase
+              .from("employees")
+              .insert({
+                user_id: userId,
+                name: resume.name,
+                gender: resume.gender || null,
+                birth_year: resume.birth_year || null,
+                education: resume.education || null,
+                major: resume.major || null,
+                current_company: resume.current_company || null,
+                current_position: resume.current_position || null,
+                years_of_experience: resume.years_of_experience || null,
+                certifications: resume.certifications || [],
+                skills: resume.skills || [],
+              })
+              .select("id")
+              .single();
+
+            if (empErr || !newEmp) {
+              console.error("Failed to create employee:", resume.name, empErr);
+              continue;
+            }
+
+            await supabase.from("resume_versions").insert({
+              employee_id: newEmp.id,
+              user_id: userId,
+              version_name: "标书导入版",
+              content: chapterText,
+              work_experiences: resume.work_experiences || [],
+              project_experiences: resume.project_experiences || [],
+              education_history: resume.education_history || [],
+              ai_status: "completed",
+            });
+
+            results.push({ name: resume.name, action: "created", employeeId: newEmp.id });
+          }
+        }
+      }
+
+      return new Response(JSON.stringify({ success: true, results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     throw new Error(`Unknown action: ${action}`);
   } catch (e) {
     console.error("resume-factory error:", e);
