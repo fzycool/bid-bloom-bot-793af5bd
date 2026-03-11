@@ -47,9 +47,14 @@ function findLineStartOccurrences(text: string, pattern: string): number[] {
 function extractTocFromText(fullText: string): Chapter[] {
   const chapters: Chapter[] = [];
 
-  // Find Word-style TOC region (look for "目录" followed by structured entries)
-  const tocIdx = fullText.indexOf("目录");
-  if (tocIdx < 0) return chapters;
+  // Find Word-style TOC region (look for "目录" or "目 录" followed by structured entries)
+  let tocIdx = fullText.indexOf("目录");
+  if (tocIdx < 0) tocIdx = fullText.indexOf("目 录");
+  
+  // If no TOC found, try scanning the full text for chapter heading patterns
+  if (tocIdx < 0) {
+    return extractChaptersFromBody(fullText);
+  }
 
   // Get text after "目录" — scan up to 50K chars to handle very long TOCs (70-80+ entries)
   const tocRegion = fullText.substring(tocIdx, Math.min(tocIdx + 50000, fullText.length));
