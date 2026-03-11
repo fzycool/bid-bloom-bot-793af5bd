@@ -13,6 +13,7 @@ import {
   Bot,
   Zap,
   FlaskConical,
+  Pencil,
 } from "lucide-react";
 
 interface ModelConfig {
