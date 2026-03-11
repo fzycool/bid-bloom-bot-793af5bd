@@ -360,12 +360,12 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
       try {
         const blob = await buildChapterDocx(zipRef.current!, parsedRef.current!, ch.startChunk, ch.endChunk);
         // Sanitize chapter title for storage path (remove invalid characters)
-        const sanitizedTitle = ch.title
-          .replace(/[\/\\:*?"<>|]/g, "_")  // Replace invalid path characters
-          .replace(/\s+/g, "_")             // Replace spaces with underscores
-          .substring(0, 100);               // Limit length
-        const chapterFileName = `${ch.section_number}_${sanitizedTitle}`;
-        const storagePath = `${user.id}/${Date.now()}_${chapterFileName}.docx`;
+        // Supabase Storage only allows ASCII keys — use encodeURIComponent for Chinese chars
+        const safeSection = encodeURIComponent(ch.section_number.replace(/\s+/g, ""));
+        const safeTitle = encodeURIComponent(
+          ch.title.replace(/[\/\\:*?"<>|]/g, "_").replace(/\s+/g, "_").substring(0, 80)
+        );
+        const storagePath = `${user.id}/${Date.now()}_${safeSection}_${safeTitle}.docx`;
         const { error: upErr } = await supabase.storage
           .from("company-materials")
           .upload(storagePath, blob, {
