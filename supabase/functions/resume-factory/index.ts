@@ -786,27 +786,39 @@ ${JSON.stringify(resume.education_history || [], null, 2)}`,
       const results: Array<{ name: string; action: "created" | "merged"; employeeId: string }> = [];
 
       for (const chapter of chapters) {
-        const chapterText = (chapter.content || "").substring(0, 8000);
-        if (chapterText.length < 50) continue;
+        // Allow more content for resume extraction (up to 15000 chars)
+        const chapterText = (chapter.content || "").substring(0, 15000);
+        if (chapterText.length < 30) continue;
 
-        // Use AI to extract structured employee info
-        const parsePrompt = `你是一位资深HR顾问。请从以下标书章节中提取人员简历信息。
-如果该章节包含多个人员简历，请分别提取每个人的信息。
-如果该章节不是人员简历（而是其他标书内容），请返回 {"resumes": []}。
+        // Use AI to extract structured employee info with enhanced prompt
+        const parsePrompt = `你是一位资深HR顾问，专门从招投标文件中提取人员简历信息。
+
+【重要提示】
+1. 标书中的人员简历格式多样，可能是表格形式、文字叙述形式或混合形式
+2. 一个章节可能包含1-20个不同人员的简历，请逐一提取每个人
+3. 简历信息可能散布在"拟派人员表"、"项目组成员"、"人员配置表"等结构中
+4. 即使信息不完整（如只有姓名和职称），也请提取出来
+5. 注意区分：如果是纯粹的组织架构描述（没有具体人员信息），返回空数组
+
+【识别线索】
+- 表格中的姓名、性别、年龄、学历、职称、证书等列
+- "姓名：XXX"、"性别：男/女" 等键值对格式
+- 人员履历、工作经历、项目业绩等描述
+- 证书编号、执业资格、注册号等信息
 
 请以JSON格式返回：
 {
   "resumes": [
     {
-      "name": "姓名",
+      "name": "姓名（必填，至少2个字符）",
       "gender": "性别(男/女/null)",
       "birth_year": 出生年份数字或null,
-      "education": "最高学历",
+      "education": "最高学历（本科/硕士/博士/大专等）",
       "major": "专业",
-      "current_company": "当前单位",
-      "current_position": "当前职位",
+      "current_company": "当前单位/工作单位",
+      "current_position": "当前职位/拟任职位",
       "years_of_experience": 工作年限数字或null,
-      "certifications": ["证书1", "证书2"],
+      "certifications": ["证书1（含编号如有）", "证书2"],
       "skills": ["技能1", "技能2"],
       "work_experiences": [
         {"company": "公司", "position": "职位", "start_date": "2020-01", "end_date": "2023-06", "description": "职责描述", "is_current": false}
@@ -820,7 +832,7 @@ ${JSON.stringify(resume.education_history || [], null, 2)}`,
     }
   ]
 }
-请严格输出纯JSON，不要包含markdown标记。`;
+请严格输出纯JSON，不要包含markdown标记。如果章节确实不含人员简历信息，返回 {"resumes": []}。`;
 
         const requestBody: any = {
           model: aiModel,

@@ -57,11 +57,19 @@ const resumeTitleKeywords = [
   "项目团队", "投标人员", "拟派人员", "管理人员", "技术人员",
   "项目组", "人员安排", "岗位人员", "人力资源", "组织机构",
   "项目部", "负责人", "总工", "总监理", "安全员", "质量员",
+  "资格审查", "人员表", "人员情况", "人员资质", "业绩人员",
+  "项目负责", "技术骨干", "核心人员", "关键人员", "服务人员",
+  "团队介绍", "团队配置", "人员名单", "人员信息", "人员资料",
+  "拟任", "拟配", "拟安排", "专业人员", "管理团队",
 ];
 const resumeContentPatterns = [
   /姓\s*名[\s:：]/, /性\s*别[\s:：].{0,4}[男女]/, /出生.{0,6}\d{4}/,
   /学\s*历[\s:：]/, /毕业院校|毕业学校/, /工作经[历验]/,
   /项目经[历验]/, /职\s*称[\s:：]/, /身份证/, /执业资格|资格证书|注册.*师/,
+  /年\s*龄[\s:：]/, /民\s*族[\s:：]/, /籍\s*贯[\s:：]/, /联系[电话方式]/,
+  /技术职称|专业职称/, /从事.*工作.*年/, /参[加与]工作/, /工作单位/,
+  /担任.*[职务岗位角色]/, /负责.*[项目工程]/, /主持.*[项目工程]/,
+  /[本硕博]科|学士|硕士|博士|研究生/, /毕\s*业/, /专\s*业[\s:：]/,
 ];
 
 export function ExtractionTaskProvider({ children }: { children: React.ReactNode }) {
@@ -180,12 +188,14 @@ export function ExtractionTaskProvider({ children }: { children: React.ReactNode
           if (i < sel.length - 1) await new Promise(r => setTimeout(r, 500));
         }
 
-        // Auto-detect and import resume chapters
+        // Auto-detect and import resume chapters with enhanced detection
         const resumeChapters = sel.filter(ch => {
-          const titleText = `${ch.section_number} ${ch.title}`;
+          const titleText = `${ch.section_number} ${ch.title}`.toLowerCase();
+          // Strong title match
           if (resumeTitleKeywords.some(kw => titleText.includes(kw))) return true;
-          const contentSample = (ch.content || "").substring(0, 3000);
-          if (!contentSample) return false;
+          // Content-based detection: scan more content (first 5000 chars)
+          const contentSample = (ch.content || "").substring(0, 5000);
+          if (!contentSample || contentSample.length < 100) return false;
           let hits = 0;
           for (const pat of resumeContentPatterns) {
             if (pat.test(contentSample)) hits++;
@@ -193,6 +203,21 @@ export function ExtractionTaskProvider({ children }: { children: React.ReactNode
           }
           return false;
         });
+
+        // If no resume chapters found by heuristics, try AI-based detection on likely candidates
+        if (resumeChapters.length === 0 && !cancelledRef.current) {
+          const candidates = sel.filter(ch => {
+            const content = (ch.content || "").substring(0, 2000);
+            // Check for at least 1 resume pattern hit
+            return resumeContentPatterns.some(pat => pat.test(content));
+          });
+          if (candidates.length > 0 && candidates.length <= 10) {
+            console.log(`Heuristic found 0 resumes, trying AI detection on ${candidates.length} candidates`);
+            for (const ch of candidates) {
+              if (!resumeChapters.includes(ch)) resumeChapters.push(ch);
+            }
+          }
+        }
 
         if (resumeChapters.length > 0 && !cancelledRef.current) {
           updateTask({ phase: "importing_resumes", current: 0, total: resumeChapters.length });
