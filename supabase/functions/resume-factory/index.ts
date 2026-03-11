@@ -1,6 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
+/** Merge two arrays of experience objects, deduplicating by a key field */
+function mergeExperiences(existing: any[], incoming: any[], keyField: string): any[] {
+  const merged = [...existing];
+  const existingKeys = new Set(existing.map((e: any) => (e[keyField] || "").toLowerCase().trim()));
+  for (const item of incoming) {
+    const key = (item[keyField] || "").toLowerCase().trim();
+    if (key && !existingKeys.has(key)) {
+      merged.push(item);
+      existingKeys.add(key);
+    }
+  }
+  return merged;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
