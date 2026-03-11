@@ -602,20 +602,44 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
           </div>
         )}
 
-        {step === "saving" && (
+        {(step === "saving" || step === "importing_resumes") && (
           <div className="space-y-4 py-8">
-            <p className="text-center text-sm font-medium">正在保存章节文件...</p>
+            <p className="text-center text-sm font-medium">
+              {step === "saving" ? "正在保存章节文件..." : "正在识别并导入人员简历..."}
+            </p>
             <Progress value={(progress.current / progress.total) * 100} />
             <p className="text-center text-xs text-muted-foreground">
-              {progress.current} / {progress.total} 个章节已保存
+              {step === "saving"
+                ? `${progress.current} / ${progress.total} 个章节已保存`
+                : "AI 正在提取简历信息并导入简历工厂"}
             </p>
           </div>
         )}
 
         {step === "done" && (
           <div className="flex flex-col items-center gap-4 py-8">
-            <Check className="w-12 h-12 text-green-500" />
+            <Check className="w-12 h-12 text-primary" />
             <p className="font-medium">提取完成</p>
+            {resumeImportResult && (resumeImportResult.created.length > 0 || resumeImportResult.merged.length > 0) && (
+              <div className="bg-muted/50 rounded-lg p-3 w-full max-w-md space-y-2">
+                <p className="text-sm font-medium flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-accent" />
+                  简历已自动导入简历工厂
+                </p>
+                {resumeImportResult.created.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    <span className="text-primary font-medium">新增：</span>
+                    {resumeImportResult.created.join("、")}
+                  </p>
+                )}
+                {resumeImportResult.merged.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    <span className="text-accent font-medium">更新：</span>
+                    {resumeImportResult.merged.join("、")}
+                  </p>
+                )}
+              </div>
+            )}
             <Button onClick={() => handleClose(false)}>关闭</Button>
           </div>
         )}
