@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useExtractionTask } from "@/contexts/ExtractionTaskContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import {
   Building2,
   Loader2,
@@ -16,6 +18,9 @@ import {
   ChevronDown,
   ChevronRight,
   List,
+  Pause,
+  Play,
+  X as XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -44,6 +49,7 @@ interface ProjectGroup {
 export default function CompanyMaterials() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { activeTask, pauseTask, resumeTask, cancelTask, clearTask } = useExtractionTask();
   const [projects, setProjects] = useState<ProjectGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<ProjectGroup | null>(null);
@@ -175,6 +181,44 @@ export default function CompanyMaterials() {
           材料提取
         </Button>
       </div>
+
+      {/* Active extraction progress */}
+      {activeTask && (activeTask.status === "running" || activeTask.status === "paused") && (
+        <Card className="border-accent/30 bg-accent/5">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <FileText className="w-4 h-4 text-accent shrink-0" />
+              <span className="text-sm font-medium flex-1 truncate">
+                正在提取：{activeTask.projectName}
+                {activeTask.status === "paused" && (
+                  <span className="text-yellow-600 dark:text-yellow-400 ml-2">（已暂停）</span>
+                )}
+              </span>
+              <div className="flex gap-1 shrink-0">
+                {activeTask.status === "running" && (
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={pauseTask} title="暂停">
+                    <Pause className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+                {activeTask.status === "paused" && (
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={resumeTask} title="继续">
+                    <Play className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={cancelTask} title="取消">
+                  <XIcon className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+            <Progress value={activeTask.total > 0 ? (activeTask.current / activeTask.total) * 100 : 0} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {activeTask.phase === "saving"
+                ? `${activeTask.current} / ${activeTask.total} 个章节已保存`
+                : "AI 正在提取简历信息并导入简历工厂"}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Project List */}
       {loading ? (
