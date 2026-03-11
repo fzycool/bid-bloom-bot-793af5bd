@@ -527,7 +527,7 @@ serve(async (req) => {
           fallbackPrompt,
           forAI,
           null,
-          16384,
+          32768,
         );
       }
 
