@@ -51,29 +51,33 @@ function extractTocFromText(fullText: string): Chapter[] {
   const tocIdx = fullText.indexOf("目录");
   if (tocIdx < 0) return chapters;
 
-  // Get text after "目录" (up to 10K chars or until we hit clear content)
-  const tocRegion = fullText.substring(tocIdx, Math.min(tocIdx + 15000, fullText.length));
+  // Get text after "目录" — scan up to 50K chars to handle very long TOCs (70-80+ entries)
+  const tocRegion = fullText.substring(tocIdx, Math.min(tocIdx + 50000, fullText.length));
   const lines = tocRegion.split("\n").slice(1); // skip the "目录" line itself
 
   // Patterns for TOC entries
   const tocPatterns = [
     // "第一章 标题" or "第1章 标题"
     /^(第[一二三四五六七八九十百千\d]+[章部分节篇])\s*[.、\s]*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
-    // "1.1. 标题" or "1.1 标题"
+    // "1.1. 标题" or "1.1 标题" — also match "1 标题"
     /^(\d+(?:\.\d+)*\.?)\s+(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
     // "（一）标题" or "(1) 标题"
     /^([（(][一二三四五六七八九十\d]+[）)])\s*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
     // "附录A 标题" or "附件1 标题"
     /^(附[录件表]\s*[A-Za-z\d]*)\s*[.、\s]*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+    // "一、标题" Chinese numbered without parentheses
+    /^([一二三四五六七八九十百]+)[、.．]\s*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
   ];
 
   let emptyLineCount = 0;
+  let consecutiveNonMatch = 0;
 
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {
       emptyLineCount++;
-      if (emptyLineCount > 3) break; // End of TOC region
+      // Allow up to 8 empty lines (DOCX TOCs often have extra spacing)
+      if (emptyLineCount > 8) break;
       continue;
     }
 
@@ -81,6 +85,8 @@ function extractTocFromText(fullText: string): Chapter[] {
     if (/^\\[lfh]$|^TOC\s|^PAGEREF/.test(trimmed)) continue;
     // Skip pure page numbers
     if (/^\d+$/.test(trimmed)) continue;
+    // Skip dots-only lines (TOC leader dots)
+    if (/^[.\s·…]+$/.test(trimmed)) continue;
 
     emptyLineCount = 0;
     let matched = false;
@@ -93,21 +99,24 @@ function extractTocFromText(fullText: string): Chapter[] {
           .replace(/\s*PAGEREF\s.*$/, "")
           .replace(/\s*\\h\s*$/, "")
           .replace(/\t.*$/, "")
+          .replace(/[.\s·…]+\d*$/, "") // Remove trailing dots + page numbers
           .trim();
 
-        if (title.length < 1 || title.length > 80) continue;
+        if (title.length < 1 || title.length > 120) continue;
 
         const level = inferLevel(sectionNum);
         chapters.push({ section_number: sectionNum, title, level });
         matched = true;
+        consecutiveNonMatch = 0;
         break;
       }
     }
 
-    // If we've collected entries but hit a non-matching line, we might be past the TOC
-    if (!matched && chapters.length > 5) {
-      // Check if this looks like content rather than TOC
-      if (trimmed.length > 100) break;
+    if (!matched) {
+      consecutiveNonMatch++;
+      // Only break after many consecutive non-matching lines AND we have some entries
+      // This prevents premature exit on TOCs with occasional noise lines
+      if (chapters.length > 10 && consecutiveNonMatch > 8 && trimmed.length > 150) break;
     }
   }
 
