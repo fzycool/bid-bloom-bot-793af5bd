@@ -111,28 +111,66 @@ async function buildChapterDocx(
   startChunk: number,
   endChunk: number
 ): Promise<Blob> {
-  const bodyXml = parsed.chunks
-    .slice(startChunk, endChunk)
-    .map((c) => c.xml)
-    .join("");
+  if (!parsed || !parsed.chunks) {
+    throw new Error("文档解析数据为空，无法生成章节文件");
+  }
+
+  // Clamp range to valid bounds
+  const safeStart = Math.max(0, Math.min(startChunk, parsed.chunks.length));
+  const safeEnd = Math.max(safeStart, Math.min(endChunk, parsed.chunks.length));
+
+  const slicedChunks = parsed.chunks.slice(safeStart, safeEnd);
+  if (slicedChunks.length === 0) {
+    // Generate a minimal document with a placeholder paragraph
+    const emptyBody = '<w:p><w:r><w:t>（本章节内容为空）</w:t></w:r></w:p>';
+    const newDocXml = parsed.docPrefix + emptyBody + parsed.sectPr + parsed.docSuffix;
+    const out = new JSZip();
+    // Copy only essential non-media files
+    const jobs: Promise<void>[] = [];
+    srcZip.forEach((path, entry) => {
+      if (entry.dir) return;
+      if (path === "word/document.xml") return;
+      if (path.startsWith("word/media/")) return;
+      jobs.push(entry.async("uint8array").then((d) => { out.file(path, d); }));
+    });
+    await Promise.all(jobs);
+    out.file("word/document.xml", newDocXml);
+    return out.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+  }
+
+  const bodyXml = slicedChunks.map((c) => c.xml).join("");
   const newDocXml = parsed.docPrefix + bodyXml + parsed.sectPr + parsed.docSuffix;
 
   // Get rels to find referenced media
-  const relsXml = await srcZip.file("word/_rels/document.xml.rels")?.async("string") || null;
+  let relsXml: string | null = null;
+  try {
+    const relsFile = srcZip.file("word/_rels/document.xml.rels");
+    if (relsFile) relsXml = await relsFile.async("string");
+  } catch { /* ignore */ }
   const referencedMedia = extractReferencedMedia(bodyXml, relsXml);
 
+  // Clone zip files sequentially to avoid internal state corruption
   const out = new JSZip();
-  const jobs: Promise<void>[] = [];
+  const entries: { path: string; entry: JSZip.JSZipObject }[] = [];
   srcZip.forEach((path, entry) => {
     if (entry.dir) return;
     if (path === "word/document.xml") return;
-
-    // Skip unreferenced media files to reduce size
     if (path.startsWith("word/media/") && !referencedMedia.has(path)) return;
-
-    jobs.push(entry.async("uint8array").then((d) => { out.file(path, d); }));
+    entries.push({ path, entry });
   });
-  await Promise.all(jobs);
+
+  for (const { path, entry } of entries) {
+    try {
+      const d = await entry.async("uint8array");
+      out.file(path, d);
+    } catch (e) {
+      console.warn(`Skip file ${path} due to read error:`, e);
+    }
+  }
+
   out.file("word/document.xml", newDocXml);
 
   return out.generateAsync({
