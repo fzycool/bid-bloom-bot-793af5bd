@@ -397,13 +397,9 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
       setProgress({ current: i + 1, total: sel.length });
       try {
         const blob = await buildChapterDocx(zipRef.current!, parsedRef.current!, ch.startChunk, ch.endChunk);
-        // Sanitize chapter title for storage path (remove invalid characters)
-        // Supabase Storage only allows ASCII keys — use encodeURIComponent for Chinese chars
-        const safeSection = encodeURIComponent(ch.section_number.replace(/\s+/g, ""));
-        const safeTitle = encodeURIComponent(
-          ch.title.replace(/[\/\\:*?"<>|]/g, "_").replace(/\s+/g, "_").substring(0, 80)
-        );
-        const storagePath = `${user.id}/${Date.now()}_${safeSection}_${safeTitle}.docx`;
+        // Supabase Storage only allows ASCII keys — use pure numeric path
+        // Chinese title is preserved in database record (file_name column)
+        const storagePath = `${user.id}/${Date.now()}_ch${i}.docx`;
         const { error: upErr } = await supabase.storage
           .from("company-materials")
           .upload(storagePath, blob, {
