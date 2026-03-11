@@ -13,6 +13,7 @@ import {
   Bot,
   Zap,
   FlaskConical,
+  Pencil,
 } from "lucide-react";
 
 interface ModelConfig {
@@ -42,7 +43,10 @@ const ModelManagement = () => {
   const [testing, setTesting] = useState<string | null>(null);
   const [editKeys, setEditKeys] = useState<Record<string, string>>({});
   const [editMaxTokens, setEditMaxTokens] = useState<Record<string, number>>({});
+  const [editBaseUrls, setEditBaseUrls] = useState<Record<string, string>>({});
+  const [editModelNames, setEditModelNames] = useState<Record<string, string>>({});
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
 
   // ... keep existing code (fetchModels, useEffect, handleSaveKey, handleActivate)
   const fetchModels = async () => {
@@ -56,12 +60,18 @@ const ModelManagement = () => {
       setModels((data as unknown as ModelConfig[]) || []);
       const keys: Record<string, string> = {};
       const tokens: Record<string, number> = {};
+      const urls: Record<string, string> = {};
+      const names: Record<string, string> = {};
       (data as unknown as ModelConfig[])?.forEach((m) => {
         keys[m.id] = m.api_key || "";
         tokens[m.id] = m.max_tokens || PROVIDER_DEFAULTS[m.provider] || 8192;
+        urls[m.id] = m.base_url || "";
+        names[m.id] = m.model_name || "";
       });
       setEditKeys(keys);
       setEditMaxTokens(tokens);
+      setEditBaseUrls(urls);
+      setEditModelNames(names);
     } catch (err: any) {
       toast({ title: "加载失败", description: err.message, variant: "destructive" });
     } finally {
@@ -78,10 +88,16 @@ const ModelManagement = () => {
     try {
       const { error } = await supabase
         .from("model_config")
-        .update({ api_key: editKeys[model.id] || null, max_tokens: editMaxTokens[model.id] || 8192 } as any)
+        .update({
+          api_key: editKeys[model.id] || null,
+          max_tokens: editMaxTokens[model.id] || 8192,
+          base_url: editBaseUrls[model.id] || model.base_url,
+          model_name: editModelNames[model.id] || model.model_name,
+        } as any)
         .eq("id", model.id);
       if (error) throw error;
       toast({ title: "配置已保存" });
+      setEditingFields((prev) => ({ ...prev, [model.id]: false }));
       fetchModels();
     } catch (err: any) {
       toast({ title: "保存失败", description: err.message, variant: "destructive" });
@@ -123,8 +139,8 @@ const ModelManagement = () => {
     try {
       const { data, error } = await supabase.functions.invoke("test-model", {
         body: {
-          base_url: model.base_url,
-          model_name: model.model_name,
+          base_url: editBaseUrls[model.id] || model.base_url,
+          model_name: editModelNames[model.id] || model.model_name,
           api_key: model.provider === "lovable" ? undefined : apiKey,
           provider: model.provider,
         },
@@ -223,9 +239,45 @@ const ModelManagement = () => {
                 </div>
               </div>
 
-              <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
-                <div>模型: <code className="bg-muted px-1 py-0.5 rounded">{m.model_name}</code></div>
-                <div className="break-all">接口: <code className="bg-muted px-1 py-0.5 rounded">{m.base_url}</code></div>
+              <div className="text-xs text-muted-foreground mb-2 space-y-1.5">
+                {editingFields[m.id] ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="w-16 shrink-0">模型:</span>
+                      <Input
+                        value={editModelNames[m.id] || ""}
+                        onChange={(e) => setEditModelNames((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                        className="text-xs h-7 flex-1"
+                        placeholder="模型名称，如 deepseek-chat"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-16 shrink-0">接口:</span>
+                      <Input
+                        value={editBaseUrls[m.id] || ""}
+                        onChange={(e) => setEditBaseUrls((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                        className="text-xs h-7 flex-1"
+                        placeholder="接口地址，如 https://api.deepseek.com/v1"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1">
+                      模型: <code className="bg-muted px-1 py-0.5 rounded">{editModelNames[m.id] || m.model_name}</code>
+                      {m.provider !== "lovable" && (
+                        <button
+                          onClick={() => setEditingFields((prev) => ({ ...prev, [m.id]: true }))}
+                          className="ml-1 text-muted-foreground hover:text-foreground"
+                          title="编辑模型和接口地址"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="break-all">接口: <code className="bg-muted px-1 py-0.5 rounded">{editBaseUrls[m.id] || m.base_url}</code></div>
+                  </>
+                )}
                 <div className="flex items-center gap-2 mt-1">
                   <span>Max Tokens:</span>
                   <Input
