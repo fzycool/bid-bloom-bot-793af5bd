@@ -425,10 +425,38 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
     }
 
     // ── Auto-detect and import resume chapters ──
-    const resumeKeywords = ["简历", "人员", "履历", "项目经理", "技术负责人", "项目总监", "拟投入", "团队成员", "主要人员", "人员配置"];
+    const resumeTitleKeywords = [
+      "简历", "人员", "履历", "项目经理", "技术负责人", "项目总监",
+      "拟投入", "团队成员", "主要人员", "人员配置", "人员组织",
+      "项目团队", "投标人员", "拟派人员", "管理人员", "技术人员",
+      "项目组", "人员安排", "岗位人员", "人力资源", "组织机构",
+      "项目部", "负责人", "总工", "总监理", "安全员", "质量员",
+    ];
+    const resumeContentPatterns = [
+      /姓\s*名[\s:：]/,
+      /性\s*别[\s:：].{0,4}[男女]/,
+      /出生.{0,6}\d{4}/,
+      /学\s*历[\s:：]/,
+      /毕业院校|毕业学校/,
+      /工作经[历验]/,
+      /项目经[历验]/,
+      /职\s*称[\s:：]/,
+      /身份证/,
+      /执业资格|资格证书|注册.*师/,
+    ];
     const resumeChapters = sel.filter(ch => {
-      const text = `${ch.section_number} ${ch.title}`;
-      return resumeKeywords.some(kw => text.includes(kw));
+      // Check title keywords
+      const titleText = `${ch.section_number} ${ch.title}`;
+      if (resumeTitleKeywords.some(kw => titleText.includes(kw))) return true;
+      // Check content for resume patterns (at least 2 matches = likely a resume)
+      const contentSample = (ch.content || "").substring(0, 3000);
+      if (!contentSample) return false;
+      let patternHits = 0;
+      for (const pat of resumeContentPatterns) {
+        if (pat.test(contentSample)) patternHits++;
+        if (patternHits >= 2) return true;
+      }
+      return false;
     });
 
     if (resumeChapters.length > 0) {
