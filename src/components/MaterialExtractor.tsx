@@ -390,6 +390,48 @@ export default function MaterialExtractor({ open, onOpenChange, onComplete }: Pr
       }
     }
 
+    // ── Auto-detect and import resume chapters ──
+    const resumeKeywords = ["简历", "人员", "履历", "项目经理", "技术负责人", "项目总监", "拟投入", "团队成员", "主要人员", "人员配置"];
+    const resumeChapters = sel.filter(ch => {
+      const text = `${ch.section_number} ${ch.title}`;
+      return resumeKeywords.some(kw => text.includes(kw));
+    });
+
+    if (resumeChapters.length > 0) {
+      setStep("importing_resumes");
+      setProgress({ current: 0, total: resumeChapters.length });
+
+      try {
+        const chaptersForImport = resumeChapters.map(ch => ({
+          section_number: ch.section_number,
+          title: ch.title,
+          content: ch.content || "",
+        }));
+
+        const { data: importResult, error: importErr } = await supabase.functions.invoke("resume-factory", {
+          body: {
+            action: "import-from-chapters",
+            userId: user.id,
+            chapters: chaptersForImport,
+          },
+        });
+
+        if (!importErr && importResult?.results?.length) {
+          const created = importResult.results.filter((r: any) => r.action === "created").map((r: any) => r.name);
+          const merged = importResult.results.filter((r: any) => r.action === "merged").map((r: any) => r.name);
+          setResumeImportResult({ created, merged });
+
+          const parts: string[] = [];
+          if (created.length) parts.push(`新增${created.length}人`);
+          if (merged.length) parts.push(`更新${merged.length}人`);
+          toast({ title: "简历已自动导入", description: `${parts.join("，")}至简历工厂` });
+        }
+      } catch (err: any) {
+        console.error("Resume import error:", err);
+        // Non-fatal: don't block the save flow
+      }
+    }
+
     setStep("done");
     toast({ title: "提取完成", description: `成功保存${sel.length}个章节到项目「${projectName}」` });
     onComplete();
