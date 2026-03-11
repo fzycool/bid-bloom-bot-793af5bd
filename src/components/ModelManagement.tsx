@@ -97,6 +97,7 @@ const ModelManagement = () => {
         .eq("id", model.id);
       if (error) throw error;
       toast({ title: "配置已保存" });
+      setEditingFields((prev) => ({ ...prev, [model.id]: false }));
       fetchModels();
     } catch (err: any) {
       toast({ title: "保存失败", description: err.message, variant: "destructive" });
