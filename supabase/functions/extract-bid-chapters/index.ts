@@ -67,6 +67,8 @@ function extractTocFromText(fullText: string): Chapter[] {
     /^(附[录件表]\s*[A-Za-z\d]*)\s*[.、\s]*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
     // "一、标题" Chinese numbered without parentheses
     /^([一二三四五六七八九十百]+)[、.．]\s*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+    // Unnumbered TOC entries: lines ending with dots + page number (e.g. "评分导航表....5")
+    /^([^\d第附（(一二三四五六七八九十\s][^\n]{1,30}?)\s*[.·…]+\s*\d+\s*$/,
   ];
 
   let emptyLineCount = 0;
