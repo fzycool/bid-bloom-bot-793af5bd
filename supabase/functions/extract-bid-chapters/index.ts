@@ -67,6 +67,8 @@ function extractTocFromText(fullText: string): Chapter[] {
     /^(附[录件表]\s*[A-Za-z\d]*)\s*[.、\s]*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
     // "一、标题" Chinese numbered without parentheses
     /^([一二三四五六七八九十百]+)[、.．]\s*(.+?)(?:\s*PAGEREF|\s*\d+\s*$|\t|$)/,
+    // Unnumbered TOC entries: lines ending with dots + page number (e.g. "评分导航表....5")
+    /^([^\d第附（(一二三四五六七八九十\s][^\n]{1,30}?)\s*[.·…]+\s*\d+\s*$/,
   ];
 
   let emptyLineCount = 0;
@@ -94,17 +96,28 @@ function extractTocFromText(fullText: string): Chapter[] {
     for (const pattern of tocPatterns) {
       const m = trimmed.match(pattern);
       if (m) {
-        const sectionNum = m[1].replace(/\.$/, "").trim();
-        const title = m[2].trim()
-          .replace(/\s*PAGEREF\s.*$/, "")
-          .replace(/\s*\\h\s*$/, "")
-          .replace(/\t.*$/, "")
-          .replace(/[.\s·…]+\d*$/, "") // Remove trailing dots + page numbers
-          .trim();
+        let sectionNum: string;
+        let title: string;
+
+        if (m.length === 2) {
+          // Unnumbered TOC entry pattern: only one capture group (the title)
+          sectionNum = "";
+          title = m[1].trim()
+            .replace(/[.\s·…]+\d*$/, "")
+            .trim();
+        } else {
+          sectionNum = m[1].replace(/\.$/, "").trim();
+          title = m[2].trim()
+            .replace(/\s*PAGEREF\s.*$/, "")
+            .replace(/\s*\\h\s*$/, "")
+            .replace(/\t.*$/, "")
+            .replace(/[.\s·…]+\d*$/, "") // Remove trailing dots + page numbers
+            .trim();
+        }
 
         if (title.length < 1 || title.length > 120) continue;
 
-        const level = inferLevel(sectionNum);
+        const level = sectionNum ? inferLevel(sectionNum) : 1;
         chapters.push({ section_number: sectionNum, title, level });
         matched = true;
         consecutiveNonMatch = 0;
@@ -228,12 +241,17 @@ function splitTextByChapters(fullText: string, chapters: Chapter[]): Chapter[] {
   if (!chapters.length) return [];
 
   const chapterCandidates = chapters.map((ch) => {
-    const seps = [" ", "  ", "\t", "、", ".", " ", ""];
     const fullPatterns: string[] = [];
-    for (const sep of seps) {
-      fullPatterns.push(`${ch.section_number}${sep}${ch.title}`);
+    if (ch.section_number) {
+      const seps = [" ", "  ", "\t", "、", ".", " ", ""];
+      for (const sep of seps) {
+        fullPatterns.push(`${ch.section_number}${sep}${ch.title}`);
+      }
+      fullPatterns.push(`${ch.section_number}\n${ch.title}`);
+    } else {
+      // Unnumbered entry: search by title alone
+      fullPatterns.push(ch.title);
     }
-    fullPatterns.push(`${ch.section_number}\n${ch.title}`);
 
     const fullPositions: number[] = [];
     for (const p of fullPatterns) {
