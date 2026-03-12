@@ -131,8 +131,8 @@ const TechCheckProjects = () => {
     projectId: string,
     category: "bid_document" | "technical_proposal"
   ) => {
-    const uploadFiles = e.target.files;
-    if (!uploadFiles || !user) return;
+    const uploadFiles = Array.from(e.target.files || []);
+    if (uploadFiles.length === 0 || !user) return;
     e.target.value = "";
 
     setUploading(projectId);
