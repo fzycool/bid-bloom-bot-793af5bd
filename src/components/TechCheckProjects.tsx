@@ -350,6 +350,39 @@ const TechCheckProjects = () => {
     setShowChecklistPicker(true);
   };
 
+  // Extract text from a file stored in Supabase
+  const extractFileText = async (filePath: string, fileName: string): Promise<{ name: string; text: string }> => {
+    const { data, error } = await supabase.storage.from("company-materials").download(filePath);
+    if (error || !data) throw new Error(`文件下载失败: ${fileName}`);
+
+    const ext = fileName.split(".").pop()?.toLowerCase();
+    if (ext === "docx" || ext === "doc") {
+      // Use JSZip to extract text from DOCX on client side
+      const JSZip = (await import("jszip")).default;
+      try {
+        const zip = await JSZip.loadAsync(await data.arrayBuffer());
+        const docXml = await zip.file("word/document.xml")?.async("string");
+        if (!docXml) return { name: fileName, text: "(无法解析文档内容)" };
+        // Strip XML tags to get plain text
+        const text = docXml
+          .replace(/<w:br[^>]*\/>/gi, "\n")
+          .replace(/<\/w:p>/gi, "\n")
+          .replace(/<[^>]+>/g, "")
+          .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+        return { name: fileName, text };
+      } catch {
+        // Fallback: try as plain text
+        const text = await data.text();
+        return { name: fileName, text };
+      }
+    }
+    // PDF or other: extract as text (limited but avoids 413)
+    const text = await data.text();
+    return { name: fileName, text: text.slice(0, 50000) };
+  };
+
   // Run quality check
   const runQualityCheck = async (projectId: string, checklist: CheckList) => {
     setShowChecklistPicker(false);
@@ -361,7 +394,17 @@ const TechCheckProjects = () => {
     const project = projects.find(p => p.id === projectId);
 
     try {
+      // Extract text from files on client side to avoid 413
+      setQcProgress(15);
+      toast.info("正在提取文件内容...");
+      
+      const [bidTexts, proposalTextsArr] = await Promise.all([
+        Promise.all(bidFiles.map(f => extractFileText(f.file_path, f.file_name))),
+        Promise.all(proposalFiles.map(f => extractFileText(f.file_path, f.file_name))),
+      ]);
+
       setQcProgress(30);
+      toast.info("正在进行AI质检分析...");
 
       const { data, error } = await supabase.functions.invoke("techcheck-quality", {
         body: {
@@ -371,8 +414,8 @@ const TechCheckProjects = () => {
             description: item.description,
             severity: item.severity,
           })),
-          bidFilePaths: bidFiles.map(f => f.file_path),
-          proposalFilePaths: proposalFiles.map(f => f.file_path),
+          bidTexts,
+          proposalTexts: proposalTextsArr,
         },
       });
 
