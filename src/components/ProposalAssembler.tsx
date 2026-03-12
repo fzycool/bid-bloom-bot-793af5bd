@@ -440,35 +440,47 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
     }
   };
 
+  // ─── Filtered materials ─────────────────────────────────────────
+
+  const projects = Array.from(new Set(materials.map(m => m.project_name || "通用材料")));
+
+  const filteredMaterials = materials.filter(m => {
+    const matchesSearch = !searchQuery ||
+      m.file_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (m.content_description || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesProject = selectedProject === "all" ||
+      (m.project_name || "通用材料") === selectedProject;
+    return matchesSearch && matchesProject;
+  });
+
+  // Group by project (used when no section selected)
+  const groupedMaterials = new Map<string, MaterialItem[]>();
+  for (const m of filteredMaterials) {
+    const key = m.project_name || "通用材料";
+    if (!groupedMaterials.has(key)) groupedMaterials.set(key, []);
+    groupedMaterials.get(key)!.push(m);
+  }
+
   // ─── Similarity scoring ─────────────────────────────────────────
 
-  // Extract keywords from a string (Chinese 2+ chars, alphanumeric tokens)
   const extractKeywords = (text: string): string[] => {
     if (!text) return [];
-    const tokens = text.toLowerCase().match(/[a-z0-9]+|[\u4e00-\u9fa5]{2,}/gi) || [];
-    // Filter out very short or common tokens
-    return tokens.filter(t => t.length >= 2);
+    return (text.toLowerCase().match(/[a-z0-9]+|[\u4e00-\u9fa5]{2,}/gi) || []).filter(t => t.length >= 2);
   };
 
-  // Compute similarity score between a section title and a material
   const computeScore = (sectionTitle: string, mat: MaterialItem): number => {
     const sectionKw = extractKeywords(sectionTitle);
     if (sectionKw.length === 0) return 0;
-
     const matText = `${mat.file_name} ${mat.content_description || ""} ${mat.material_type || ""}`.toLowerCase();
     const matKw = extractKeywords(matText);
-
     let score = 0;
     for (const kw of sectionKw) {
-      // Direct containment in material text
       if (matText.includes(kw)) score += 3;
-      // Keyword overlap
       for (const mk of matKw) {
         if (mk === kw) { score += 5; break; }
         if (mk.includes(kw) || kw.includes(mk)) { score += 2; break; }
       }
     }
-    // Bonus for exact title containment
     const cleanTitle = sectionTitle.replace(/[\d.、\s]/g, "").toLowerCase();
     const cleanFileName = mat.file_name.replace(/\.\w+$/, "").replace(/[\d._\s]/g, "").toLowerCase();
     if (cleanFileName && cleanTitle && (cleanFileName.includes(cleanTitle) || cleanTitle.includes(cleanFileName))) {
@@ -477,7 +489,6 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
     return score;
   };
 
-  // Get the selected section's full title path
   const getSelectedSectionTitle = (): string => {
     if (!selectedSectionId) return "";
     const find = (nodes: ProposalSection[]): ProposalSection | null => {
@@ -493,32 +504,16 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
 
   const selectedTitle = getSelectedSectionTitle();
 
-  // Score and sort materials
   const scoredMaterials = filteredMaterials.map(mat => ({
     mat,
     score: selectedSectionId ? computeScore(selectedTitle, mat) : 0,
   }));
 
-  // Sort: matched first (by score desc), then unmatched
   if (selectedSectionId) {
     scoredMaterials.sort((a, b) => b.score - a.score);
   }
 
-  const matchedMats = scoredMaterials.filter(s => s.score > 0);
-  const unmatchedMats = scoredMaterials.filter(s => s.score === 0);
-
-  // ─── Filtered materials ─────────────────────────────────────────
-
-  const projects = Array.from(new Set(materials.map(m => m.project_name || "通用材料")));
-
-  const filteredMaterials = materials.filter(m => {
-    const matchesSearch = !searchQuery ||
-      m.file_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (m.content_description || "").toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesProject = selectedProject === "all" ||
-      (m.project_name || "通用材料") === selectedProject;
-    return matchesSearch && matchesProject;
-  });
+  const matchedCount = scoredMaterials.filter(s => s.score > 0).length;
 
   const totalAssembled = Object.values(assembly).flat().length;
 
