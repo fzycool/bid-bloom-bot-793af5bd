@@ -413,6 +413,22 @@ const TechnicalBidCheck = () => {
           </DialogContent>
         </Dialog>
 
+        {/* Project list */}
+        <TechCheckProjects />
+
+        {/* Separator */}
+        <div className="border-t pt-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-foreground">检查清单</h3>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setShowTemplatePicker(true)} size="sm" variant="outline" className="gap-1.5">
+                <Plus className="w-4 h-4" />
+                新建清单
+              </Button>
+            </div>
+          </div>
+        </div>
+
         {checklists.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
