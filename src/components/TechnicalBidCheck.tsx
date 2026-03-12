@@ -305,6 +305,12 @@ const TechnicalBidCheck = () => {
             <Plus className="w-4 h-4" />
             新建检查清单
           </Button>
+          <label>
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} />
+            <Button variant="outline" className="gap-1.5" asChild>
+              <span><Upload className="w-4 h-4" />导入Excel</span>
+            </Button>
+          </label>
         </div>
 
         {checklists.length === 0 ? (
