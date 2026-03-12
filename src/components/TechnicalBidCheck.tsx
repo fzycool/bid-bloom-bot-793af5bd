@@ -187,6 +187,67 @@ const TechnicalBidCheck = () => {
     toast.success("已重置所有检查项");
   };
 
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target?.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws);
+
+        if (rows.length === 0) return toast.error("Excel文件为空");
+
+        const severityMap: Record<string, CheckItem["severity"]> = {
+          "关键": "critical", "critical": "critical",
+          "重要": "major", "major": "major",
+          "一般": "minor", "minor": "minor",
+        };
+
+        const items: CheckItem[] = rows
+          .filter((r) => (r["检查项"] || r["标题"] || r["title"] || "").trim())
+          .map((r) => ({
+            id: genId(),
+            category: (r["分类"] || r["类别"] || r["category"] || "未分类").trim(),
+            title: (r["检查项"] || r["标题"] || r["title"] || "").trim(),
+            description: (r["说明"] || r["描述"] || r["description"] || "").trim(),
+            severity: severityMap[(r["严重程度"] || r["severity"] || "major").trim().toLowerCase()] || "major",
+            status: "unchecked" as const,
+            notes: "",
+          }));
+
+        if (items.length === 0) return toast.error("未识别到有效检查项，请确认列名包含「检查项」或「标题」");
+
+        if (activeList) {
+          // Append to current checklist
+          updateList((list) => ({ ...list, items: [...list.items, ...items] }));
+          toast.success(`已从Excel导入 ${items.length} 个检查项`);
+        } else {
+          // Create new checklist from upload
+          const id = genId();
+          const newList: CheckList = {
+            id,
+            name: file.name.replace(/\.(xlsx?|csv)$/i, ""),
+            projectName: "",
+            items,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          setChecklists((prev) => [newList, ...prev]);
+          setActiveListId(id);
+          toast.success(`已从Excel创建检查清单，共 ${items.length} 个检查项`);
+        }
+      } catch (err: any) {
+        console.error("Excel parse error:", err);
+        toast.error("Excel解析失败：" + (err.message || "未知错误"));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => {
       const next = new Set(prev);
