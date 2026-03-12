@@ -75,6 +75,9 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProject, setSelectedProject] = useState<string | "all">("all");
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevAssemblyRef = useRef<string>("");
 
   // Fetch extracted DOCX materials
   const fetchMaterials = useCallback(async () => {
