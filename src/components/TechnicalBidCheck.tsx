@@ -140,7 +140,7 @@ const TechnicalBidCheck = () => {
   const { user } = useAuth();
   const [checklists, setChecklists] = useState<CheckList[]>([]);
   const [activeListId, setActiveListId] = useState<string | null>(null);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(DEFAULT_CATEGORIES));
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [newItemMode, setNewItemMode] = useState(false);
   const [newItem, setNewItem] = useState({ category: "", title: "", description: "", severity: "major" as CheckItem["severity"] });
