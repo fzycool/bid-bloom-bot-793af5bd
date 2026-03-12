@@ -537,8 +537,13 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
           onDrop={(e) => handleDrop(e, section.id)}
         >
           <button
-            onClick={() => toggleSection(section.id)}
-            className="flex-1 text-left flex items-start gap-1.5 px-2 py-2 rounded hover:bg-secondary transition-colors min-w-0"
+            onClick={() => {
+              toggleSection(section.id);
+              setSelectedSectionId(section.id);
+            }}
+            className={`flex-1 text-left flex items-start gap-1.5 px-2 py-2 rounded transition-colors min-w-0 ${
+              selectedSectionId === section.id ? "bg-accent/10 hover:bg-accent/15" : "hover:bg-secondary"
+            }`}
           >
             {hasChildren ? (
               isExpanded ? <ChevronDown className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
