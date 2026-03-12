@@ -18,7 +18,7 @@ import {
   ShieldCheck, AlertCircle, Clock, Image as ImageIcon, UserPlus, X, ChevronLeft,
   Send, MessageSquare, PanelLeftClose, PanelRightClose,
   Pencil, MoreVertical, ChevronUp, FolderPlus, BookOpen,
-  Pause, Play,
+  Pause, Play, Package,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
