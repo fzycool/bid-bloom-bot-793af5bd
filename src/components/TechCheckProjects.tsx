@@ -141,7 +141,7 @@ const TechCheckProjects = () => {
     let failCount = 0;
     const failedFiles: string[] = [];
 
-    for (const file of Array.from(uploadFiles)) {
+    for (const file of uploadFiles) {
       // Validate file type
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
       if (category === "bid_document" && !["pdf", "docx", "doc"].includes(ext)) {
