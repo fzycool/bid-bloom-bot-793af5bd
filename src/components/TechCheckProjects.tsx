@@ -55,6 +55,13 @@ const TechCheckProjects = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [uploading, setUploading] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    current: number;
+    total: number;
+    currentFileName: string;
+    failLogs: { name: string; reason: string }[];
+    successCount: number;
+  } | null>(null);
   const bidInputRef = useRef<HTMLInputElement>(null);
   const proposalInputRef = useRef<HTMLInputElement>(null);
   const uploadProjectRef = useRef<string | null>(null);
