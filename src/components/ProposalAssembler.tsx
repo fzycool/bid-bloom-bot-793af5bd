@@ -72,6 +72,9 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
   const [draggedMaterial, setDraggedMaterial] = useState<MaterialItem | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // For reordering assigned materials within sections
+  const [reorderDrag, setReorderDrag] = useState<{ sectionId: string; matId: string } | null>(null);
+  const [reorderDropIndex, setReorderDropIndex] = useState<{ sectionId: string; index: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProject, setSelectedProject] = useState<string | "all">("all");
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
@@ -240,6 +243,51 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
         return next;
       }
       return { ...prev, [sectionId]: updated };
+    });
+  };
+
+  // ─── Reorder assigned materials via drag ───────────────────────
+  const handleAssignedDragStart = (sectionId: string, matId: string) => {
+    setReorderDrag({ sectionId, matId });
+  };
+
+  const handleAssignedDragOver = (e: React.DragEvent, sectionId: string, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setReorderDropIndex({ sectionId, index });
+  };
+
+  const handleAssignedDrop = (e: React.DragEvent, targetSectionId: string, targetIndex: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setReorderDropIndex(null);
+    if (!reorderDrag) return;
+
+    const { sectionId: srcSectionId, matId } = reorderDrag;
+    setReorderDrag(null);
+
+    setAssembly(prev => {
+      const next = { ...prev };
+      // Find the material
+      const srcList = [...(next[srcSectionId] || [])];
+      const matIndex = srcList.findIndex(m => m.id === matId);
+      if (matIndex < 0) return prev;
+      const [mat] = srcList.splice(matIndex, 1);
+
+      if (srcSectionId === targetSectionId) {
+        // Reorder within same section
+        srcList.splice(targetIndex, 0, mat);
+        next[srcSectionId] = srcList;
+      } else {
+        // Move to different section
+        if (srcList.length === 0) delete next[srcSectionId];
+        else next[srcSectionId] = srcList;
+        const dstList = [...(next[targetSectionId] || [])];
+        if (dstList.some(m => m.id === matId)) return prev; // already there
+        dstList.splice(targetIndex, 0, mat);
+        next[targetSectionId] = dstList;
+      }
+      return next;
     });
   };
 
@@ -726,22 +774,54 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
 
         {/* Assigned materials */}
         {assignedMats.length > 0 && (
-          <div className="ml-8 mb-1 space-y-1" style={{ paddingLeft: depth * 16 }}>
+          <div className="ml-8 mb-1" style={{ paddingLeft: depth * 16 }}>
             {assignedMats.map((mat, idx) => (
-              <div key={mat.id} className="flex items-center gap-2 px-2 py-1 rounded bg-accent/10 border border-accent/20 text-xs group">
-                <span className="text-muted-foreground font-mono">{idx + 1}.</span>
-                <FileText className="w-3 h-3 text-accent shrink-0" />
-                <span className="truncate flex-1 text-foreground">{mat.file_name}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
-                  onClick={() => handleRemoveMaterial(section.id, mat.id)}
+              <div key={mat.id}>
+                {/* Drop indicator line above */}
+                <div
+                  className={`h-0.5 rounded transition-colors ${
+                    reorderDropIndex?.sectionId === section.id && reorderDropIndex?.index === idx
+                      ? "bg-accent my-0.5"
+                      : "bg-transparent"
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); handleAssignedDragOver(e, section.id, idx); }}
+                  onDrop={(e) => handleAssignedDrop(e, section.id, idx)}
+                />
+                <div
+                  draggable
+                  onDragStart={(e) => { e.stopPropagation(); handleAssignedDragStart(section.id, mat.id); }}
+                  onDragEnd={() => { setReorderDrag(null); setReorderDropIndex(null); }}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); handleAssignedDragOver(e, section.id, idx); }}
+                  onDrop={(e) => handleAssignedDrop(e, section.id, idx)}
+                  className={`flex items-center gap-2 px-2 py-1 rounded bg-accent/10 border border-accent/20 text-xs group cursor-grab active:cursor-grabbing transition-all ${
+                    reorderDrag?.matId === mat.id ? "opacity-40 scale-95" : ""
+                  }`}
                 >
-                  <Trash2 className="w-3 h-3" />
-                </Button>
+                  <GripVertical className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+                  <span className="text-muted-foreground font-mono">{idx + 1}.</span>
+                  <FileText className="w-3 h-3 text-accent shrink-0" />
+                  <span className="truncate flex-1 text-foreground">{mat.file_name}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                    onClick={() => handleRemoveMaterial(section.id, mat.id)}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
               </div>
             ))}
+            {/* Drop indicator at end */}
+            <div
+              className={`h-0.5 rounded transition-colors ${
+                reorderDropIndex?.sectionId === section.id && reorderDropIndex?.index === assignedMats.length
+                  ? "bg-accent my-0.5"
+                  : "bg-transparent"
+              }`}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); handleAssignedDragOver(e, section.id, assignedMats.length); }}
+              onDrop={(e) => handleAssignedDrop(e, section.id, assignedMats.length)}
+            />
           </div>
         )}
 
