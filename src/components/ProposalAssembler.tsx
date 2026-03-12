@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   FileText, ChevronRight, ChevronDown, Download, Loader2,
   GripVertical, Trash2, FolderOpen, ArrowRight, Package,
-  ChevronLeft, Search, Zap, Star,
+  ChevronLeft, Search, Zap, Star, Plus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import JSZip from "jszip";
@@ -529,7 +529,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       <div key={section.id}>
         <div
           className={`flex items-start gap-1 rounded-lg transition-all ${
-            isDropTarget ? "bg-accent/20 ring-2 ring-accent" : ""
+            isDropTarget ? "bg-accent/15 ring-2 ring-accent ring-offset-1" : draggedMaterial ? "hover:bg-accent/10 hover:ring-1 hover:ring-accent/40" : ""
           }`}
           style={{ paddingLeft: depth * 16 }}
           onDragOver={(e) => handleDragOver(e, section.id)}
@@ -583,16 +583,20 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
           </div>
         )}
 
-        {/* Drop hint when dragging */}
-        {draggedMaterial && assignedMats.length === 0 && !hasChildren && (
+        {/* Drop hint only visible while actively dragging over this section */}
+        {draggedMaterial && (
           <div
-            className="ml-8 mb-1 border-2 border-dashed border-muted-foreground/20 rounded-lg px-3 py-2 text-xs text-muted-foreground text-center"
+            className={`ml-8 mb-1 rounded-lg px-3 py-1.5 text-xs text-center transition-all ${
+              isDropTarget
+                ? "border-2 border-dashed border-accent bg-accent/10 text-accent"
+                : "border border-dashed border-transparent text-transparent h-0 py-0 overflow-hidden"
+            }`}
             style={{ paddingLeft: depth * 16 }}
             onDragOver={(e) => handleDragOver(e, section.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, section.id)}
           >
-            拖放材料到此处
+            松开以添加到此章节
           </div>
         )}
 
@@ -750,6 +754,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
                     </p>
                   )}
                   {scoredMaterials.map(({ mat, score }) => {
+                    const isAssignedToSelected = selectedSectionId ? (assembly[selectedSectionId] || []).some(m => m.id === mat.id) : false;
                     const isAssigned = Object.values(assembly).some(mats => mats.some(m => m.id === mat.id));
                     const isMatched = score > 0;
                     return (
@@ -779,9 +784,27 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
                             <Zap className="w-2.5 h-2.5" />{Math.min(score, 99)}
                           </Badge>
                         )}
-                        {isAssigned && (
+                        {isAssignedToSelected ? (
+                          <Badge variant="secondary" className="text-[10px] shrink-0">已添加</Badge>
+                        ) : selectedSectionId ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[10px] shrink-0 gap-1 border-accent/40 text-accent hover:bg-accent hover:text-accent-foreground"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAssembly(prev => {
+                                const existing = prev[selectedSectionId] || [];
+                                if (existing.some(m => m.id === mat.id)) return prev;
+                                return { ...prev, [selectedSectionId]: [...existing, mat] };
+                              });
+                            }}
+                          >
+                            <Plus className="w-3 h-3" />填入
+                          </Button>
+                        ) : isAssigned ? (
                           <Badge variant="secondary" className="text-[10px] shrink-0">已分配</Badge>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
