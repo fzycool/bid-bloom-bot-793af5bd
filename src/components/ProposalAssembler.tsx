@@ -231,11 +231,18 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       if (!bodyTag) throw new Error("无法解析模板结构");
       const bodyStart = bodyTag.index! + bodyTag[0].length;
       const bodyEnd = templateDocXml.lastIndexOf("</w:body>");
+      if (bodyEnd < 0) throw new Error("无法找到 body 结束标签");
       const body = templateDocXml.substring(bodyStart, bodyEnd);
       const sectMatch = body.match(/<w:sectPr\b[\s\S]*<\/w:sectPr>\s*$/);
       const sectPr = sectMatch ? sectMatch[0] : "";
-      const docPrefix = templateDocXml.substring(0, bodyStart);
+      let docPrefix = templateDocXml.substring(0, bodyStart);
       const docSuffix = templateDocXml.substring(bodyEnd);
+
+      // Collect all namespace declarations we might need
+      const nsSet = new Set<string>();
+      const nsRe = /xmlns:\w+="[^"]+"/g;
+      let nsm: RegExpExecArray | null;
+      while ((nsm = nsRe.exec(docPrefix)) !== null) nsSet.add(nsm[0]);
 
       // Build output zip starting from template (copy everything except document.xml)
       const outZip = new JSZip();
@@ -252,16 +259,13 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
         const stylesFile = templateZip.file("word/styles.xml");
         if (stylesFile) {
           const stylesXml = await stylesFile.async("string");
-          // Look for heading styles - try common patterns
           const foundIds: string[] = [];
           const styleIdRe = /<w:style[^>]*w:styleId="([^"]*[Hh]eading\d+|[^"]*标题\s*\d+)[^"]*"/g;
           let sm: RegExpExecArray | null;
           while ((sm = styleIdRe.exec(stylesXml)) !== null) {
             foundIds.push(sm[1]);
           }
-          // Also check for a]0-9 pattern (common in Chinese templates like "a0", "a1")
           if (foundIds.length === 0) {
-            // Try built-in heading type detection
             const builtinRe = /<w:style[^>]*w:type="paragraph"[^>]*w:styleId="([^"]+)"[^>]*>[\s\S]*?<w:name\s+w:val="heading\s*(\d+)"[^\/]*\/>[\s\S]*?<\/w:style>/gi;
             while ((sm = builtinRe.exec(stylesXml)) !== null) {
               const level = parseInt(sm[2]);
@@ -271,7 +275,6 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
             }
           }
           if (foundIds.length > 0) {
-            // Sort by heading level if detected
             headingStyleIds = foundIds.slice(0, 4);
             while (headingStyleIds.length < 4) headingStyleIds.push(headingStyleIds[headingStyleIds.length - 1]);
           }
@@ -283,7 +286,6 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       let mediaCounter = 0;
       const relEntries: string[] = [];
       const newMediaExtensions = new Set<string>();
-      // Track existing rels
       let existingRels = "";
       try {
         const relsFile = templateZip.file("word/_rels/document.xml.rels");
@@ -298,7 +300,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       for (const { section, depth, materials: sectionMats } of orderedMats) {
         // Add page break before each section (except the first)
         if (!isFirstSection) {
-          combinedBody += `<w:p><w:pPr><w:sectPr><w:type w:val="continuous"/></w:sectPr></w:pPr></w:p>`;
+          combinedBody += `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
         }
         isFirstSection = false;
 
