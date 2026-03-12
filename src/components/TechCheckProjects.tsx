@@ -22,6 +22,10 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
+  Play,
+  AlertTriangle,
+  XCircle,
+  ClipboardCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -47,12 +51,49 @@ interface FileUploadStatus {
   fileName: string;
   fileSize: number;
   status: "pending" | "uploading" | "success" | "error";
-  progress: number; // 0-100
+  progress: number;
   error?: string;
+}
+
+interface CheckItem {
+  id: string;
+  category: string;
+  title: string;
+  description: string;
+  status: "unchecked" | "pass" | "fail" | "warning";
+  notes: string;
+  severity: "critical" | "major" | "minor";
+}
+
+interface CheckList {
+  id: string;
+  name: string;
+  projectName: string;
+  items: CheckItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface QCResult {
+  itemIndex: number;
+  status: "pass" | "fail" | "warning";
+  score: number;
+  finding: string;
+  suggestion?: string;
+}
+
+interface QCReport {
+  results: QCResult[];
+  overallScore: number;
+  summary: string;
+  checkItems: CheckItem[];
+  projectName: string;
+  timestamp: string;
 }
 
 const ACCEPTED_BID = ".pdf,.docx,.doc";
 const ACCEPTED_PROPOSAL = ".docx,.doc";
+const STORAGE_KEY = "tech-bid-checklists";
 
 const formatSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -75,6 +116,14 @@ const TechCheckProjects = () => {
   // Error dialog
   const [errorLogs, setErrorLogs] = useState<{ name: string; reason: string }[]>([]);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
+
+  // Quality check state
+  const [showChecklistPicker, setShowChecklistPicker] = useState(false);
+  const [pickerProjectId, setPickerProjectId] = useState<string | null>(null);
+  const [qcRunning, setQcRunning] = useState<string | null>(null); // projectId currently running
+  const [qcProgress, setQcProgress] = useState(0);
+  const [qcReport, setQcReport] = useState<QCReport | null>(null);
+  const [showQcResult, setShowQcResult] = useState(false);
 
   const bidInputRef = useRef<HTMLInputElement>(null);
   const proposalInputRef = useRef<HTMLInputElement>(null);
@@ -103,6 +152,17 @@ const TechCheckProjects = () => {
   useEffect(() => {
     fetchData();
   }, [user]);
+
+  // Load checklists from localStorage
+  const getChecklists = (): CheckList[] => {
+    if (!user?.id) return [];
+    try {
+      const stored = localStorage.getItem(`${STORAGE_KEY}-${user.id}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  };
 
   const createProject = async () => {
     if (!user) return;
@@ -171,7 +231,6 @@ const TechCheckProjects = () => {
     setShowErrorDialog(false);
     const categoryLabel = category === "bid_document" ? "招标文件" : "技术方案";
 
-    // Initialize per-file statuses
     const initialStatuses: FileUploadStatus[] = uploadFiles.map((f) => ({
       fileName: f.name,
       fileSize: f.size,
@@ -186,7 +245,6 @@ const TechCheckProjects = () => {
       const file = uploadFiles[i];
       updateFileStatus(i, { status: "uploading", progress: 10 });
 
-      // Validate file type
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
       if (category === "bid_document" && !["pdf", "docx", "doc"].includes(ext)) {
         updateFileStatus(i, { status: "error", progress: 100, error: `格式不支持（.${ext}），仅支持 PDF/Word` });
@@ -246,11 +304,9 @@ const TechCheckProjects = () => {
 
     setUploading(null);
 
-    // Auto-clear statuses after delay
     const hasErrors = uploadFiles.length !== successCount;
     setTimeout(() => setFileStatuses([]), hasErrors ? 15000 : 4000);
 
-    // Summary toast
     const totalFiles = uploadFiles.length;
     if (successCount === totalFiles) {
       toast.success(`🎉 全部上传成功！共上传 ${successCount} 个${categoryLabel}`);
@@ -282,6 +338,100 @@ const TechCheckProjects = () => {
   const getProjectFiles = (projectId: string, category: string) =>
     files.filter((f) => f.project_id === projectId && f.category === category);
 
+  // Quality check: open checklist picker
+  const handleStartQC = (projectId: string) => {
+    const bidFiles = getProjectFiles(projectId, "bid_document");
+    const proposalFiles = getProjectFiles(projectId, "technical_proposal");
+    if (bidFiles.length === 0) return toast.error("请先上传招标文件");
+    if (proposalFiles.length === 0) return toast.error("请先上传技术方案");
+    const checklists = getChecklists();
+    if (checklists.length === 0) return toast.error("请先创建检查清单（在下方检查清单区域）");
+    setPickerProjectId(projectId);
+    setShowChecklistPicker(true);
+  };
+
+  // Run quality check
+  const runQualityCheck = async (projectId: string, checklist: CheckList) => {
+    setShowChecklistPicker(false);
+    setQcRunning(projectId);
+    setQcProgress(10);
+
+    const bidFiles = getProjectFiles(projectId, "bid_document");
+    const proposalFiles = getProjectFiles(projectId, "technical_proposal");
+    const project = projects.find(p => p.id === projectId);
+
+    try {
+      setQcProgress(30);
+
+      const { data, error } = await supabase.functions.invoke("techcheck-quality", {
+        body: {
+          checkItems: checklist.items.map(item => ({
+            category: item.category,
+            title: item.title,
+            description: item.description,
+            severity: item.severity,
+          })),
+          bidFilePaths: bidFiles.map(f => f.file_path),
+          proposalFilePaths: proposalFiles.map(f => f.file_path),
+        },
+      });
+
+      setQcProgress(90);
+
+      if (error) throw new Error(error.message || "质检请求失败");
+
+      // Handle string response
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.error) throw new Error(parsed.error);
+
+      const report: QCReport = {
+        results: parsed.results || [],
+        overallScore: parsed.overallScore || 0,
+        summary: parsed.summary || "",
+        checkItems: checklist.items,
+        projectName: project?.project_name || "未知项目",
+        timestamp: new Date().toISOString(),
+      };
+
+      setQcReport(report);
+      setQcProgress(100);
+      setShowQcResult(true);
+
+      // Also update the checklist items with AI results
+      const stored = localStorage.getItem(`${STORAGE_KEY}-${user?.id}`);
+      if (stored) {
+        try {
+          const allLists: CheckList[] = JSON.parse(stored);
+          const updated = allLists.map(cl => {
+            if (cl.id !== checklist.id) return cl;
+            return {
+              ...cl,
+              updatedAt: new Date().toISOString(),
+              items: cl.items.map((item, idx) => {
+                const r = report.results.find(r => r.itemIndex === idx);
+                if (!r) return item;
+                return {
+                  ...item,
+                  status: r.status as CheckItem["status"],
+                  notes: `[AI质检 ${r.score}分] ${r.finding}${r.suggestion ? `\n💡 建议：${r.suggestion}` : ""}`,
+                };
+              }),
+            };
+          });
+          localStorage.setItem(`${STORAGE_KEY}-${user?.id}`, JSON.stringify(updated));
+        } catch { /* ignore */ }
+      }
+
+      toast.success(`质检完成！综合评分：${report.overallScore}分`);
+    } catch (err: any) {
+      console.error("QC error:", err);
+      toast.error("质检失败：" + (err.message || "未知错误"));
+    } finally {
+      setQcRunning(null);
+      setQcProgress(0);
+    }
+  };
+
   const fileIcon = (fileName: string) => {
     const ext = fileName.split(".").pop()?.toLowerCase();
     if (ext === "pdf") return <FileType2 className="w-4 h-4 text-destructive" />;
@@ -296,6 +446,22 @@ const TechCheckProjects = () => {
       case "success": return <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />;
       case "error": return <AlertCircle className="w-4 h-4 text-destructive shrink-0" />;
     }
+  };
+
+  const qcStatusIcon = (status: string) => {
+    switch (status) {
+      case "pass": return <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />;
+      case "fail": return <XCircle className="w-4 h-4 text-destructive shrink-0" />;
+      case "warning": return <AlertTriangle className="w-4 h-4 text-yellow-500 shrink-0" />;
+      default: return null;
+    }
+  };
+
+  const scoreColor = (score: number) => {
+    if (score >= 90) return "text-green-500";
+    if (score >= 70) return "text-primary";
+    if (score >= 50) return "text-yellow-500";
+    return "text-destructive";
   };
 
   if (loading) {
@@ -338,6 +504,133 @@ const TechCheckProjects = () => {
           </ScrollArea>
           <div className="flex justify-end pt-2">
             <Button variant="outline" size="sm" onClick={() => setShowErrorDialog(false)}>
+              关闭
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Checklist Picker Dialog */}
+      <Dialog open={showChecklistPicker} onOpenChange={setShowChecklistPicker}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardCheck className="w-5 h-5 text-primary" />
+              选择检查清单
+            </DialogTitle>
+            <DialogDescription>选择一个检查清单，AI将根据清单中的检查项逐项检查技术方案</DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[400px]">
+            <div className="space-y-2 pr-2">
+              {getChecklists().map((cl) => {
+                const total = cl.items.length;
+                return (
+                  <div
+                    key={cl.id}
+                    className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                    onClick={() => pickerProjectId && runQualityCheck(pickerProjectId, cl)}
+                  >
+                    <ClipboardCheck className="w-5 h-5 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground">{cl.name}</p>
+                      {cl.projectName && <p className="text-[10px] text-muted-foreground">{cl.projectName}</p>}
+                    </div>
+                    <Badge variant="secondary" className="text-[10px] shrink-0">{total} 项</Badge>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* QC Result Dialog */}
+      <Dialog open={showQcResult} onOpenChange={setShowQcResult}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardCheck className="w-5 h-5 text-primary" />
+              质检报告 - {qcReport?.projectName}
+            </DialogTitle>
+            <DialogDescription>
+              {qcReport?.timestamp && new Date(qcReport.timestamp).toLocaleString("zh-CN")}
+            </DialogDescription>
+          </DialogHeader>
+
+          {qcReport && (
+            <div className="flex-1 overflow-auto space-y-4">
+              {/* Score summary */}
+              <div className="grid grid-cols-4 gap-3">
+                <Card className="p-3 text-center col-span-1">
+                  <p className="text-xs text-muted-foreground">综合评分</p>
+                  <p className={`text-3xl font-bold ${scoreColor(qcReport.overallScore)}`}>
+                    {qcReport.overallScore}
+                  </p>
+                </Card>
+                <Card className="p-3 text-center">
+                  <p className="text-xs text-muted-foreground">通过</p>
+                  <p className="text-xl font-bold text-green-500">
+                    {qcReport.results.filter(r => r.status === "pass").length}
+                  </p>
+                </Card>
+                <Card className="p-3 text-center">
+                  <p className="text-xs text-muted-foreground">需注意</p>
+                  <p className="text-xl font-bold text-yellow-500">
+                    {qcReport.results.filter(r => r.status === "warning").length}
+                  </p>
+                </Card>
+                <Card className="p-3 text-center">
+                  <p className="text-xs text-muted-foreground">不通过</p>
+                  <p className="text-xl font-bold text-destructive">
+                    {qcReport.results.filter(r => r.status === "fail").length}
+                  </p>
+                </Card>
+              </div>
+
+              {/* Summary */}
+              <Card className="p-4">
+                <p className="text-xs font-medium text-muted-foreground mb-1">AI 质检总结</p>
+                <p className="text-sm text-foreground">{qcReport.summary}</p>
+              </Card>
+
+              {/* Per-item results */}
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">逐项检查结果</p>
+                {qcReport.results.map((r, idx) => {
+                  const item = qcReport.checkItems[r.itemIndex];
+                  if (!item) return null;
+                  return (
+                    <div
+                      key={idx}
+                      className={`rounded-lg border p-3 ${
+                        r.status === "fail" ? "border-destructive/30 bg-destructive/5" :
+                        r.status === "pass" ? "border-green-500/20 bg-green-500/5" :
+                        "border-yellow-500/20 bg-yellow-500/5"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        {qcStatusIcon(r.status)}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-foreground">{item.title}</span>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">{item.category}</Badge>
+                            <span className={`text-sm font-bold ml-auto ${scoreColor(r.score)}`}>{r.score}分</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">{r.finding}</p>
+                          {r.suggestion && (
+                            <p className="text-xs text-primary mt-1">💡 {r.suggestion}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2 border-t">
+            <Button variant="outline" size="sm" onClick={() => setShowQcResult(false)}>
               关闭
             </Button>
           </div>
@@ -392,6 +685,7 @@ const TechCheckProjects = () => {
             const proposalFiles = getProjectFiles(proj.id, "technical_proposal");
             const totalFiles = bidFiles.length + proposalFiles.length;
             const isUploading = uploading === proj.id;
+            const isQcRunning = qcRunning === proj.id;
 
             return (
               <Card key={proj.id} className="overflow-hidden">
@@ -428,6 +722,21 @@ const TechCheckProjects = () => {
                     )}
                   </div>
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    {/* 进行质检 button */}
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      disabled={isQcRunning || isUploading || bidFiles.length === 0 || proposalFiles.length === 0}
+                      onClick={() => handleStartQC(proj.id)}
+                    >
+                      {isQcRunning ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5" />
+                      )}
+                      {isQcRunning ? "质检中..." : "进行质检"}
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -449,6 +758,17 @@ const TechCheckProjects = () => {
                     </Button>
                   </div>
                 </div>
+
+                {/* QC Progress bar */}
+                {isQcRunning && (
+                  <div className="px-4 pb-2">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      AI正在逐项检查技术方案...
+                    </div>
+                    <Progress value={qcProgress} className="h-1.5" />
+                  </div>
+                )}
 
                 {/* Expanded content */}
                 {isExpanded && (

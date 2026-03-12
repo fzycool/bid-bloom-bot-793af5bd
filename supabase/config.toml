@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.organize-toc]
 verify_jwt = false
+
+[functions.techcheck-quality]
+verify_jwt = false
