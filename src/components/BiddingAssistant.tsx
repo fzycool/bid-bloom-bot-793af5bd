@@ -1506,7 +1506,65 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
       const level = Math.min(depth, 3) as 0 | 1 | 2 | 3;
       // Don't include section_number prefix since multi-level numbering auto-generates it
       children.push(makeHeading(section.title, level));
-      if (section.content) {
+
+      // Check if this section has assembled materials (XML-level DOCX source)
+      if (section.source_type === "material_assembly" && section.source_id) {
+        try {
+          const materialRefs: { file_path: string; file_name: string }[] = JSON.parse(section.source_id);
+          for (const ref of materialRefs) {
+            const { data: matData } = await supabase.storage
+              .from("company-materials")
+              .download(ref.file_path);
+            if (!matData) continue;
+            const zip = await JSZip.loadAsync(matData);
+            const docXml = await zip.file("word/document.xml")?.async("string");
+            if (!docXml) continue;
+
+            // Extract clean text: remove field codes (PAGEREF, TOC, etc.), then strip XML tags
+            const cleanXml = docXml
+              // Remove entire fldChar/instrText field sequences
+              .replace(/<w:fldChar[^>]*w:fldCharType="begin"[^>]*\/>[\s\S]*?<w:fldChar[^>]*w:fldCharType="end"[^>]*\/>/g, "")
+              // Remove standalone instrText elements
+              .replace(/<w:instrText[^>]*>[\s\S]*?<\/w:instrText>/g, "")
+              // Remove fldSimple wrappers but keep inner text
+              .replace(/<w:fldSimple[^>]*>([\s\S]*?)<\/w:fldSimple>/g, "$1");
+
+            // Now extract text paragraphs
+            const paragraphs: string[] = [];
+            const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+            let pm: RegExpExecArray | null;
+            while ((pm = pRe.exec(cleanXml)) !== null) {
+              const pContent = pm[1];
+              // Skip paragraphs that are part of TOC (w:sdt with TOC)
+              if (/<w:pStyle[^>]*w:val="TOC/.test(pContent)) continue;
+              // Extract text runs
+              const textParts: string[] = [];
+              const tRe = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+              let tm: RegExpExecArray | null;
+              while ((tm = tRe.exec(pContent)) !== null) {
+                let t = tm[1]
+                  .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+                  .replace(/&amp;/g, "&").replace(/&apos;/g, "'").replace(/&quot;/g, '"');
+                textParts.push(t);
+              }
+              // Check for tabs and breaks
+              const hasTab = /<w:tab\/>/.test(pContent);
+              const text = textParts.join(hasTab ? "\t" : "");
+              if (text.trim()) paragraphs.push(text);
+            }
+
+            for (const para of paragraphs) {
+              children.push(makeBody(para));
+            }
+          }
+        } catch (e) {
+          console.error("Failed to extract assembled material content:", e);
+          // Fallback to stored content
+          if (section.content) {
+            children.push(makeBody(section.content));
+          }
+        }
+      } else if (section.content) {
         children.push(makeBody(section.content));
       }
     }
