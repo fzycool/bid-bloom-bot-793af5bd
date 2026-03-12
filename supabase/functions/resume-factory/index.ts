@@ -32,7 +32,10 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
-    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    let aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    if (modelConfig?.base_url && !aiUrl.endsWith("/chat/completions")) {
+      aiUrl = aiUrl.replace(/\/+$/, "") + "/chat/completions";
+    }
     const aiModel = modelConfig?.model_name || "openai/gpt-5.2";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
     const isLovable = !modelConfig || modelConfig.provider === "lovable";
