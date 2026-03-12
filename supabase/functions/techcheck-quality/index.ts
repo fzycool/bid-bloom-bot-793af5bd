@@ -1,12 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+const MAX_CONTENT_CHARS = 80000; // ~80k chars total to stay under AI limits
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -19,55 +20,39 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get active model config
     const { data: modelConfig } = await supabase.from("model_config").select("*").eq("is_active", true).maybeSingle();
     const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
     const aiModel = modelConfig?.model_name || "google/gemini-2.5-flash";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY;
 
-    const { checkItems, bidFilePaths, proposalFilePaths } = await req.json();
+    // Accept pre-extracted text content from client side
+    const { checkItems, bidTexts, proposalTexts } = await req.json();
 
     if (!checkItems || !Array.isArray(checkItems) || checkItems.length === 0) {
       throw new Error("checkItems is required and must be a non-empty array");
     }
-    if (!bidFilePaths || bidFilePaths.length === 0) {
+    if (!bidTexts || bidTexts.length === 0) {
       throw new Error("至少需要上传一个招标文件");
     }
-    if (!proposalFilePaths || proposalFilePaths.length === 0) {
+    if (!proposalTexts || proposalTexts.length === 0) {
       throw new Error("至少需要上传一个技术方案");
     }
-
-    // Download files and extract text content
-    const downloadFile = async (path: string): Promise<{ text: string; name: string }> => {
-      const { data, error } = await supabase.storage.from("company-materials").download(path);
-      if (error || !data) throw new Error(`文件下载失败: ${path} - ${error?.message}`);
-      const fileName = path.split("/").pop() || "unknown";
-      const ext = fileName.split(".").pop()?.toLowerCase();
-
-      if (ext === "pdf") {
-        // For PDF, send as base64 in a file content block
-        const arrayBuffer = await data.arrayBuffer();
-        const b64 = base64Encode(new Uint8Array(arrayBuffer));
-        return { text: `[PDF文件: ${fileName}，base64编码已传入]`, name: fileName };
-      }
-      // For docx/doc, extract as text
-      const text = await data.text();
-      return { text, name: fileName };
-    };
-
-    // Download all files in parallel
-    const [bidContents, proposalContents] = await Promise.all([
-      Promise.all(bidFilePaths.map(downloadFile)),
-      Promise.all(proposalFilePaths.map(downloadFile)),
-    ]);
 
     // Build checklist text
     const checklistText = checkItems.map((item: any, idx: number) => 
       `${idx + 1}. [${item.severity === "critical" ? "关键" : item.severity === "major" ? "重要" : "一般"}] ${item.category} - ${item.title}\n   检查要求：${item.description}`
     ).join("\n\n");
 
-    const bidText = bidContents.map(c => `--- 招标文件: ${c.name} ---\n${c.text}`).join("\n\n");
-    const proposalText = proposalContents.map(c => `--- 技术方案: ${c.name} ---\n${c.text}`).join("\n\n");
+    // Combine and truncate content to stay within limits
+    const bidContent = bidTexts.map((t: any) => `--- 招标文件: ${t.name} ---\n${t.text}`).join("\n\n");
+    const proposalContent = proposalTexts.map((t: any) => `--- 技术方案: ${t.name} ---\n${t.text}`).join("\n\n");
+    
+    const totalAvailable = MAX_CONTENT_CHARS - checklistText.length;
+    const bidAlloc = Math.floor(totalAvailable * 0.4);
+    const proposalAlloc = Math.floor(totalAvailable * 0.6);
+    
+    const truncatedBid = bidContent.length > bidAlloc ? bidContent.slice(0, bidAlloc) + "\n...[内容已截断]" : bidContent;
+    const truncatedProposal = proposalContent.length > proposalAlloc ? proposalContent.slice(0, proposalAlloc) + "\n...[内容已截断]" : proposalContent;
 
     const systemPrompt = `你是一位资深投标评审专家，负责按照检查清单对技术方案进行逐项质量检查。
 
@@ -107,48 +92,12 @@ status判定规则：
 - 50 <= score < 80 → "warning"  
 - score < 50 → "fail"`;
 
-    const userContent = `【检查清单】\n${checklistText}\n\n【招标文件】\n${bidText}\n\n【技术方案（被检查对象）】\n${proposalText}`;
+    const userContent = `【检查清单】\n${checklistText}\n\n【招标文件】\n${truncatedBid}\n\n【技术方案（被检查对象）】\n${truncatedProposal}`;
 
-    // Build messages - handle PDF files specially
-    const messages: any[] = [{ role: "system", content: systemPrompt }];
-    
-    // Check if any bid files are PDFs
-    const pdfBidFiles = bidFilePaths.filter((p: string) => p.toLowerCase().endsWith(".pdf"));
-    
-    if (pdfBidFiles.length > 0) {
-      // For PDFs, use file content blocks
-      const contentParts: any[] = [];
-      
-      for (const pdfPath of pdfBidFiles) {
-        const { data, error } = await supabase.storage.from("company-materials").download(pdfPath);
-        if (!error && data) {
-          const arrayBuffer = await data.arrayBuffer();
-          const b64 = base64Encode(new Uint8Array(arrayBuffer));
-          contentParts.push({
-            type: "file",
-            file: {
-              filename: pdfPath.split("/").pop() || "bid-document.pdf",
-              file_data: `data:application/pdf;base64,${b64}`,
-            },
-          });
-        }
-      }
-      
-      // Add non-PDF bid content + proposal content + checklist as text
-      const nonPdfBidText = bidContents
-        .filter((_, i) => !bidFilePaths[i].toLowerCase().endsWith(".pdf"))
-        .map(c => `--- 招标文件: ${c.name} ---\n${c.text}`)
-        .join("\n\n");
-      
-      contentParts.push({
-        type: "text",
-        text: `以上是招标文件PDF。\n\n${nonPdfBidText ? `【其他招标文件】\n${nonPdfBidText}\n\n` : ""}【检查清单】\n${checklistText}\n\n【技术方案（被检查对象）】\n${proposalText}`,
-      });
-      
-      messages.push({ role: "user", content: contentParts });
-    } else {
-      messages.push({ role: "user", content: userContent });
-    }
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ];
 
     const response = await fetch(aiUrl, {
       method: "POST",
