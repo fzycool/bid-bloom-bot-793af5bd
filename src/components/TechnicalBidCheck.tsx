@@ -167,19 +167,20 @@ const TechnicalBidCheck = () => {
 
   const activeList = checklists.find((c) => c.id === activeListId) || null;
 
-  const createNewChecklist = () => {
+  const createFromTemplate = (template: ChecklistTemplate) => {
     const id = genId();
     const newList: CheckList = {
       id,
-      name: `检查单 ${checklists.length + 1}`,
+      name: template.name,
       projectName: "",
-      items: DEFAULT_CHECK_ITEMS.map((item) => ({ ...item, id: genId() })),
+      items: template.items.map((item) => ({ ...item, id: genId() })),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     setChecklists((prev) => [newList, ...prev]);
     setActiveListId(id);
-    toast.success("已创建新的检查清单（含默认检查项）");
+    setShowTemplatePicker(false);
+    toast.success(`已基于「${template.name}」创建检查清单，共${template.items.length}个检查项`);
   };
 
   const deleteChecklist = (id: string) => {
