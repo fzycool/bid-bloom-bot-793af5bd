@@ -137,20 +137,29 @@ const TechCheckProjects = () => {
 
     setUploading(projectId);
     const categoryLabel = category === "bid_document" ? "招标文件" : "技术方案";
+    let successCount = 0;
+    let failCount = 0;
+    const failedFiles: string[] = [];
 
     for (const file of Array.from(uploadFiles)) {
       // Validate file type
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
       if (category === "bid_document" && !["pdf", "docx", "doc"].includes(ext)) {
         toast.error(`「${file.name}」格式不支持，招标文件仅支持 PDF/Word`);
+        failCount++;
+        failedFiles.push(file.name);
         continue;
       }
       if (category === "technical_proposal" && !["docx", "doc"].includes(ext)) {
         toast.error(`「${file.name}」格式不支持，技术方案仅支持 Word`);
+        failCount++;
+        failedFiles.push(file.name);
         continue;
       }
       if (file.size > 50 * 1024 * 1024) {
         toast.error(`「${file.name}」超过50MB限制`);
+        failCount++;
+        failedFiles.push(file.name);
         continue;
       }
 
@@ -161,6 +170,8 @@ const TechCheckProjects = () => {
 
       if (uploadErr) {
         toast.error(`上传「${file.name}」失败: ${uploadErr.message}`);
+        failCount++;
+        failedFiles.push(file.name);
         continue;
       }
 
@@ -180,13 +191,30 @@ const TechCheckProjects = () => {
 
       if (insertErr) {
         toast.error(`保存记录失败: ${insertErr.message}`);
+        failCount++;
+        failedFiles.push(file.name);
         continue;
       }
 
       setFiles((prev) => [fileRow as TechCheckFile, ...prev]);
-      toast.success(`${categoryLabel}「${file.name}」上传成功`);
+      successCount++;
     }
+
     setUploading(null);
+
+    // 汇总提示
+    const totalFiles = uploadFiles.length;
+    if (successCount === totalFiles) {
+      toast.success(`🎉 全部上传成功！共上传 ${successCount} 个${categoryLabel}文件`);
+    } else if (successCount > 0 && failCount > 0) {
+      toast.warning(`⚠️ 部分上传成功：${successCount} 个成功，${failCount} 个失败`, {
+        description: failedFiles.join("、"),
+      });
+    } else {
+      toast.error(`❌ 上传失败！${failCount} 个文件未能上传`, {
+        description: failedFiles.join("、"),
+      });
+    }
   };
 
   const deleteFile = async (file: TechCheckFile) => {
