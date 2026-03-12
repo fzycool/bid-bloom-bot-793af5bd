@@ -350,23 +350,9 @@ const TechnicalBidCheck = () => {
   if (!activeList) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-foreground">技术标质量检查</h2>
-            <p className="text-sm text-muted-foreground mt-1">创建检查清单，逐项确认标书质量</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => setShowTemplatePicker(true)} className="gap-1.5">
-              <Plus className="w-4 h-4" />
-              新建检查清单
-            </Button>
-            <label>
-              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} />
-              <Button variant="outline" className="gap-1.5" asChild>
-                <span><Upload className="w-4 h-4" />导入Excel</span>
-              </Button>
-            </label>
-          </div>
+        <div>
+          <h2 className="text-xl font-bold text-foreground">技术标质量检查</h2>
+          <p className="text-sm text-muted-foreground mt-1">管理质检项目，上传招标文件和技术方案，逐项确认标书质量</p>
         </div>
 
         {/* Template Picker Dialog */}
