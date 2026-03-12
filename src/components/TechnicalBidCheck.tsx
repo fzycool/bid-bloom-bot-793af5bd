@@ -25,6 +25,7 @@ import {
   FolderOpen,
   Clock,
   Upload,
+  BookTemplate,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
