@@ -398,6 +398,12 @@ const TechnicalBidCheck = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <label>
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} />
+            <Button variant="outline" size="sm" className="gap-1" asChild>
+              <span><Upload className="w-3.5 h-3.5" />导入Excel</span>
+            </Button>
+          </label>
           <Button variant="outline" size="sm" onClick={resetAllItems} className="gap-1">
             <RotateCcw className="w-3.5 h-3.5" />
             重置
