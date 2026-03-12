@@ -200,7 +200,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       // Flatten sections in order
       const flat = flattenTree(sections);
 
-      // Collect all unique materials in order
+      // Collect sections that have materials
       const orderedMats: { section: ProposalSection; depth: number; materials: MaterialItem[] }[] = [];
       for (const { section, depth } of flat) {
         const mats = assembly[section.id];
@@ -237,7 +237,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       const docPrefix = templateDocXml.substring(0, bodyStart);
       const docSuffix = templateDocXml.substring(bodyEnd);
 
-      // Build output zip starting from template
+      // Build output zip starting from template (copy everything except document.xml)
       const outZip = new JSZip();
       const copyJobs: Promise<void>[] = [];
       templateZip.forEach((path, entry) => {
@@ -246,10 +246,43 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       });
       await Promise.all(copyJobs);
 
+      // Detect available heading style IDs from template styles.xml
+      let headingStyleIds = ["Heading1", "Heading2", "Heading3", "Heading4"];
+      try {
+        const stylesFile = templateZip.file("word/styles.xml");
+        if (stylesFile) {
+          const stylesXml = await stylesFile.async("string");
+          // Look for heading styles - try common patterns
+          const foundIds: string[] = [];
+          const styleIdRe = /<w:style[^>]*w:styleId="([^"]*[Hh]eading\d+|[^"]*标题\s*\d+)[^"]*"/g;
+          let sm: RegExpExecArray | null;
+          while ((sm = styleIdRe.exec(stylesXml)) !== null) {
+            foundIds.push(sm[1]);
+          }
+          // Also check for a]0-9 pattern (common in Chinese templates like "a0", "a1")
+          if (foundIds.length === 0) {
+            // Try built-in heading type detection
+            const builtinRe = /<w:style[^>]*w:type="paragraph"[^>]*w:styleId="([^"]+)"[^>]*>[\s\S]*?<w:name\s+w:val="heading\s*(\d+)"[^\/]*\/>[\s\S]*?<\/w:style>/gi;
+            while ((sm = builtinRe.exec(stylesXml)) !== null) {
+              const level = parseInt(sm[2]);
+              if (level >= 1 && level <= 4) {
+                foundIds[level - 1] = sm[1];
+              }
+            }
+          }
+          if (foundIds.length > 0) {
+            // Sort by heading level if detected
+            headingStyleIds = foundIds.slice(0, 4);
+            while (headingStyleIds.length < 4) headingStyleIds.push(headingStyleIds[headingStyleIds.length - 1]);
+          }
+        }
+      } catch { /* use defaults */ }
+
       // Collect all body content and media from each material
       let combinedBody = "";
       let mediaCounter = 0;
       const relEntries: string[] = [];
+      const newMediaExtensions = new Set<string>();
       // Track existing rels
       let existingRels = "";
       try {
@@ -260,13 +293,20 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       // Process each section's materials
       const processedPaths = new Set<string>();
       processedPaths.add(firstMat.file_path);
+      let isFirstSection = true;
 
       for (const { section, depth, materials: sectionMats } of orderedMats) {
-        // Add section heading
-        const level = Math.min(depth, 3);
-        const headingStyle = level === 0 ? "1" : level === 1 ? "2" : level === 2 ? "3" : "4";
+        // Add page break before each section (except the first)
+        if (!isFirstSection) {
+          combinedBody += `<w:p><w:pPr><w:sectPr><w:type w:val="continuous"/></w:sectPr></w:pPr></w:p>`;
+        }
+        isFirstSection = false;
+
+        // Add section heading using inline formatting (bold, larger font) to avoid style dependency issues
         const sectionTitle = `${section.section_number ? section.section_number + " " : ""}${section.title}`;
-        combinedBody += `<w:p><w:pPr><w:pStyle w:val="heading${headingStyle}"/></w:pPr><w:r><w:t>${escapeXml(sectionTitle)}</w:t></w:r></w:p>`;
+        const level = Math.min(depth, 3);
+        const fontSize = level === 0 ? "32" : level === 1 ? "28" : level === 2 ? "24" : "22"; // half-points
+        combinedBody += `<w:p><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="${fontSize}"/><w:szCs w:val="${fontSize}"/></w:rPr><w:t xml:space="preserve">${escapeXml(sectionTitle)}</w:t></w:r></w:p>`;
 
         for (const mat of sectionMats) {
           let matZip: JSZip;
@@ -328,6 +368,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
               if (relType.includes("image") || relType.includes("oleObject") || relType.includes("chart")) {
                 mediaCounter++;
                 const ext = targetPath.split(".").pop() || "bin";
+                newMediaExtensions.add(ext);
                 const newMediaName = `media/merged_${mediaCounter}.${ext}`;
                 const newMediaPath = `word/${newMediaName}`;
                 const newRelId = `rMerge${mediaCounter}`;
@@ -367,10 +408,44 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
         outZip.file("word/_rels/document.xml.rels", updatedRels);
       }
 
+      // Update [Content_Types].xml with any new media extensions
+      if (newMediaExtensions.size > 0) {
+        const ctFile = outZip.file("[Content_Types].xml");
+        if (ctFile) {
+          let ctXml = await ctFile.async("string");
+          const extMimeMap: Record<string, string> = {
+            png: "image/png",
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            gif: "image/gif",
+            bmp: "image/bmp",
+            tiff: "image/tiff",
+            tif: "image/tiff",
+            emf: "image/x-emf",
+            wmf: "image/x-wmf",
+            svg: "image/svg+xml",
+            bin: "application/octet-stream",
+          };
+          for (const ext of newMediaExtensions) {
+            // Only add if not already present
+            if (!ctXml.includes(`Extension="${ext}"`)) {
+              const mime = extMimeMap[ext.toLowerCase()] || "application/octet-stream";
+              ctXml = ctXml.replace(
+                "</Types>",
+                `<Default Extension="${ext}" ContentType="${mime}"/></Types>`
+              );
+            }
+          }
+          outZip.file("[Content_Types].xml", ctXml);
+        }
+      }
+
       // Generate and download
       const blob = await outZip.generateAsync({
         type: "blob",
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
       });
 
       const proposalName = sections.length > 0
