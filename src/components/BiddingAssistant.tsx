@@ -1504,15 +1504,74 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
 
     children.push(makeHeading("投标文件提纲", 0, false));
 
+    const extractParagraphsFromDocXml = (docXml: string) => {
+      const cleanXml = docXml
+        .replace(/<w:fldChar[^>]*w:fldCharType="begin"[^>]*\/>[\s\S]*?<w:fldChar[^>]*w:fldCharType="end"[^>]*\/>/g, "")
+        .replace(/<w:instrText[^>]*>[\s\S]*?<\/w:instrText>/g, "")
+        .replace(/<w:fldSimple[^>]*>([\s\S]*?)<\/w:fldSimple>/g, "$1");
+
+      const paragraphs: string[] = [];
+      const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+      let pm: RegExpExecArray | null;
+      while ((pm = pRe.exec(cleanXml)) !== null) {
+        const pContent = pm[1];
+        if (/<w:pStyle[^>]*w:val="TOC/.test(pContent)) continue;
+
+        const textParts: string[] = [];
+        const tRe = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+        let tm: RegExpExecArray | null;
+        while ((tm = tRe.exec(pContent)) !== null) {
+          textParts.push(
+            tm[1]
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&amp;/g, "&")
+              .replace(/&apos;/g, "'")
+              .replace(/&quot;/g, '"')
+          );
+        }
+
+        const text = textParts.join(/<w:tab\/>/.test(pContent) ? "\t" : "");
+        if (text.trim()) paragraphs.push(text);
+      }
+      return paragraphs;
+    };
+
+    const resolveMaterialRefs = async (section: ProposalSection) => {
+      if (section.source_type === "material_assembly" && section.source_id) {
+        return JSON.parse(section.source_id) as { file_path: string; file_name: string }[];
+      }
+
+      // 兼容历史数据：从“【来源：公司材料库（原样移植）- xxx.docx】”中反查材料
+      const markerRe = /【来源：公司材料库（原样移植）\s*-\s*([^\]】]+\.docx)】/g;
+      const names = new Set<string>();
+      let mm: RegExpExecArray | null;
+      while ((mm = markerRe.exec(section.content || "")) !== null) names.add(mm[1].trim());
+      if (names.size === 0 || !user) return [];
+
+      const { data } = await supabase
+        .from("company_materials")
+        .select("file_name, file_path, created_at")
+        .eq("user_id", user.id)
+        .in("file_name", Array.from(names))
+        .order("created_at", { ascending: false });
+
+      const latestByName = new Map<string, { file_path: string; file_name: string }>();
+      for (const row of data || []) {
+        if (!latestByName.has(row.file_name)) {
+          latestByName.set(row.file_name, { file_path: row.file_path, file_name: row.file_name });
+        }
+      }
+      return Array.from(latestByName.values());
+    };
+
     for (const { section, depth } of flatSections) {
       const level = Math.min(depth, 3) as 0 | 1 | 2 | 3;
-      // Don't include section_number prefix since multi-level numbering auto-generates it
       children.push(makeHeading(section.title, level));
 
-      // Check if this section has assembled materials (XML-level DOCX source)
-      if (section.source_type === "material_assembly" && section.source_id) {
-        try {
-          const materialRefs: { file_path: string; file_name: string }[] = JSON.parse(section.source_id);
+      try {
+        const materialRefs = await resolveMaterialRefs(section);
+        if (materialRefs.length > 0) {
           for (const ref of materialRefs) {
             const { data: matData } = await supabase.storage
               .from("company-materials")
@@ -1522,52 +1581,22 @@ c) 字体：有明确要求的按要求执行，没有明确要求按文档模�
             const docXml = await zip.file("word/document.xml")?.async("string");
             if (!docXml) continue;
 
-            // Extract clean text: remove field codes (PAGEREF, TOC, etc.), then strip XML tags
-            const cleanXml = docXml
-              // Remove entire fldChar/instrText field sequences
-              .replace(/<w:fldChar[^>]*w:fldCharType="begin"[^>]*\/>[\s\S]*?<w:fldChar[^>]*w:fldCharType="end"[^>]*\/>/g, "")
-              // Remove standalone instrText elements
-              .replace(/<w:instrText[^>]*>[\s\S]*?<\/w:instrText>/g, "")
-              // Remove fldSimple wrappers but keep inner text
-              .replace(/<w:fldSimple[^>]*>([\s\S]*?)<\/w:fldSimple>/g, "$1");
-
-            // Now extract text paragraphs
-            const paragraphs: string[] = [];
-            const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
-            let pm: RegExpExecArray | null;
-            while ((pm = pRe.exec(cleanXml)) !== null) {
-              const pContent = pm[1];
-              // Skip paragraphs that are part of TOC (w:sdt with TOC)
-              if (/<w:pStyle[^>]*w:val="TOC/.test(pContent)) continue;
-              // Extract text runs
-              const textParts: string[] = [];
-              const tRe = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
-              let tm: RegExpExecArray | null;
-              while ((tm = tRe.exec(pContent)) !== null) {
-                let t = tm[1]
-                  .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-                  .replace(/&amp;/g, "&").replace(/&apos;/g, "'").replace(/&quot;/g, '"');
-                textParts.push(t);
-              }
-              // Check for tabs and breaks
-              const hasTab = /<w:tab\/>/.test(pContent);
-              const text = textParts.join(hasTab ? "\t" : "");
-              if (text.trim()) paragraphs.push(text);
-            }
-
-            for (const para of paragraphs) {
-              children.push(makeBody(para));
-            }
+            const paragraphs = extractParagraphsFromDocXml(docXml);
+            for (const para of paragraphs) children.push(makeBody(para));
           }
-        } catch (e) {
-          console.error("Failed to extract assembled material content:", e);
-          // Fallback to stored content
-          if (section.content) {
-            children.push(makeBody(section.content));
-          }
+          continue;
         }
-      } else if (section.content) {
-        children.push(makeBody(section.content));
+      } catch (e) {
+        console.error("Resolve assembled material content failed:", e);
+      }
+
+      if (section.content) {
+        const cleanedFallback = section.content
+          .replace(/【来源：公司材料库（原样移植）\s*-\s*[^\]】]+】/g, "")
+          .replace(/\s*PAGEREF\s+_Toc\d+\s+\\h\s*\d*/gi, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+        if (cleanedFallback) children.push(makeBody(cleanedFallback));
       }
     }
 
