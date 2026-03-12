@@ -27,6 +27,7 @@ import BackendManagement from "@/components/BackendManagement";
 import BidComparison from "@/components/BidComparison";
 import CompanyMaterials from "@/components/CompanyMaterials";
 import ResumeTemplates from "@/components/ResumeTemplates";
+import TechnicalBidCheck from "@/components/TechnicalBidCheck";
 
 const baseModules = [
   { id: "overview", label: "数据看板", icon: LayoutDashboard },
@@ -35,6 +36,7 @@ const baseModules = [
   { id: "resume", label: "简历工厂", icon: Users },
   { id: "bid", label: "投标助手", icon: ClipboardCheck },
   { id: "audit", label: "全息审查", icon: CheckCircle },
+  { id: "techcheck", label: "技术标质检", icon: ClipboardCheck },
   
   { id: "knowledge", label: "知识库", icon: BookOpen },
   { id: "materials", label: "公司材料", icon: Building2 },
