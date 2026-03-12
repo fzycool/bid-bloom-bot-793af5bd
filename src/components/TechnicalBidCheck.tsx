@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
   Plus,
   Trash2,
@@ -24,6 +25,7 @@ import {
   FolderOpen,
   Clock,
   Upload,
+  BookTemplate,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -81,6 +83,55 @@ const DEFAULT_CHECK_ITEMS: Omit<CheckItem, "id">[] = [
   { category: "附件材料", title: "扫描件清晰可辨", description: "资质证书、业绩证明等扫描件是否清晰可辨认", status: "unchecked", notes: "", severity: "minor" },
 ];
 
+// V2.0 专业技术标质量检查模板 - 基于实际行业标准
+const V2_TEMPLATE_ITEMS: Omit<CheckItem, "id">[] = [
+  { category: "技术标框架检查", title: "评分标准符合度检查", description: "逐字逐句检查评分标准是否在标书中有对应内容。技术评分标准的每一句话都作为技术方案的一个子章节名称（特例：若招标文件有要求的固定格式以招标文件为准）", status: "unchecked", notes: "", severity: "critical" },
+  { category: "技术标框架检查", title: "投标文件结构要求对应", description: "招标文件中若有对投标文件结构的要求，一定完全对应", status: "unchecked", notes: "", severity: "critical" },
+  { category: "技术标框架检查", title: "技术需求应答章节覆盖", description: "招标文件中技术需求中提供的内容，需要用技术方案应答的，在框架中有对应章节的书写", status: "unchecked", notes: "", severity: "critical" },
+  { category: "技术需求理解", title: "需求点对点应答", description: "技术需求理解作为技术方案的第一部分内容，表达对客户需求的理解。针对技术需求书的每一段话在需求理解中有对应内容。如果有对应章节需写明详见章节", status: "unchecked", notes: "", severity: "major" },
+  { category: "技术偏离表", title: "偏离表逐一应答", description: "若要求逐一应答必须与技术需求书完全一致；偏离表格式需按照招标文件给定格式不得修改；响应内容列需严格按照招标文件要求；表头和落款信息填写完整", status: "unchecked", notes: "", severity: "critical" },
+  { category: "技术方案内容检查", title: "内容完整性检查", description: "所有各级章节均已完成相应文字的编写。评分标准中要求的实质性响应、星号、关键重点条款需严格按照要求进行应答。框架中有需要技术补充字样的地方必须有补充内容", status: "unchecked", notes: "", severity: "critical" },
+  { category: "技术方案内容检查", title: "内容合理性与准确性", description: "编写的内容是否合理：无文不对题、无不合理重复内容、说明文字充分（多维度阐述）、无语病、无其他不合适之处", status: "unchecked", notes: "", severity: "critical" },
+  { category: "技术方案内容检查", title: "内容逻辑与一致性", description: "工作量投入计划数字核对准确；同一内容上下文一致（人员规模、工作日、百分比、入场时间等）；无歧义描述；章节互相引用正确；公司人数全文一致；技术支持邮件地址和热线电话正确", status: "unchecked", notes: "", severity: "major" },
+  { category: "客户与公司名称", title: "客户称谓准确一致", description: "非银行客户不得出现本行、行方、我行等银行字样；银行客户不得出现保险、国债、证券等字样；当前客户简称全文一致", status: "unchecked", notes: "", severity: "critical" },
+  { category: "客户与公司名称", title: "全文无其他客户名称", description: "成功案例和简历除外，技术标书中不能出现由于摘抄其他标书而带入的其他客户名字", status: "unchecked", notes: "", severity: "critical" },
+  { category: "客户与公司名称", title: "我司名称正确且一致", description: "公司简称统一（如捷科、润和软件等）；描述我司时不能出现本行、行方、我行等", status: "unchecked", notes: "", severity: "major" },
+  { category: "格式与排版", title: "排版字体版式检查", description: "排版规范清晰、无错别字；已删除招标文件评分标准相关文字（涂黄色/红色字体）；无多余分节符；复查时无修订记录和批注。正文宋体小四行距1.5倍首行空两格；表格宋体五号行距1.0倍", status: "unchecked", notes: "", severity: "major" },
+  { category: "承诺与服务", title: "服务承诺完整", description: "全文搜索招标文件中承诺字样，确认技术相关承诺逐一全部应答且内容完整无遗漏。针对技术需求书中的服务指标要求应编写服务承诺书章节。承诺须有抬头（客户方全称）和落款（公司全称和投标日期）落款后空至少三行", status: "unchecked", notes: "", severity: "critical" },
+  { category: "承诺与服务", title: "增值服务内容", description: "只要客户在招标文件中提到过增值服务，无论是否在评分标准中均需编写。对要求的每一条增值服务均要有对应内容", status: "unchecked", notes: "", severity: "major" },
+  { category: "承诺与服务", title: "培训方案", description: "资源池标书一般都放。若招标文件中有具体要求一定要按照客户要求逐一对应细化编写和个性化补充（如培训次数、培训针对人群、课程覆盖等）", status: "unchecked", notes: "", severity: "major" },
+  { category: "合同与索引", title: "合同项检查", description: "投标须知、技术需求、技术偏离表（含备注）、技术方案格式要求中提到合同的情况下，检查需求理解或技术方案中是否有相应内容与合同相关内容匹配", status: "unchecked", notes: "", severity: "minor" },
+  { category: "合同与索引", title: "索引表正确完整", description: "有相应的文字说明且言简意赅，相应章节正确", status: "unchecked", notes: "", severity: "major" },
+  { category: "质量提升项", title: "过渡句检查", description: "章节有过渡句要提到客户名称，让阅读者感觉标书为本次招标所写。过渡句应贴合招标要求编写，提到客户相应需求、客户名称、本项目关注点。每个评分项都需增加过渡句", status: "unchecked", notes: "", severity: "major" },
+  { category: "质量提升项", title: "运行项目总结", description: "对于运行中的项目（老客户续签招采），一定要有针对该项目的总结，说明我方对客户项目特点及管理要求等的理解，建议放在技术需求理解章节单独子章节", status: "unchecked", notes: "", severity: "major" },
+  { category: "质量提升项", title: "标书质量水平检查", description: "技术需求内容应在标书中有所体现；应突出本项目专属特色；方案表述应专业务实、逻辑严谨，避免过度AI化文风，确保贴合项目实际、可读性强", status: "unchecked", notes: "", severity: "major" },
+  { category: "篇幅与页数", title: "技术标总页数要求", description: "邀标/单一来源/竞争性谈判无硬性要求。公开招标资源型项目：21家系统重要性银行等大行不少于1000页，其他500页以上。公开招标项目型项目：完全公开招标300页，其余不做硬性要求", status: "unchecked", notes: "", severity: "major" },
+  { category: "篇幅与页数", title: "评分项对应页数保证", description: "评分标准技术评分项对应的技术标书内容应保证一定页数（某评分项得分2分则至少3页内容对应）。覆盖评分标准和技术需求的技术内容应占总体标书60%以上", status: "unchecked", notes: "", severity: "major" },
+  { category: "人员相关", title: "人员评分项应答", description: "评分项需要有对应章节且章节内容不允许为空。文字描述内容完整覆盖评分点（如团队持证情况章节需有文字概括描述，不确定的数据应标黄）", status: "unchecked", notes: "", severity: "major" },
+];
+
+interface ChecklistTemplate {
+  id: string;
+  name: string;
+  description: string;
+  items: Omit<CheckItem, "id">[];
+}
+
+const BUILTIN_TEMPLATES: ChecklistTemplate[] = [
+  {
+    id: "default",
+    name: "通用检查模板",
+    description: "涵盖格式规范、资质证明、人员配置、报价等8大类20项基本检查",
+    items: DEFAULT_CHECK_ITEMS,
+  },
+  {
+    id: "v2-professional",
+    name: "技术标质量检查 V2.0",
+    description: "专业级技术标质量检查，含21项核心检查项（满分100分），覆盖框架、需求理解、偏离表、内容完整性、逻辑一致性、格式排版、承诺服务、篇幅要求等",
+    items: V2_TEMPLATE_ITEMS,
+  },
+];
+
 const genId = () => crypto.randomUUID();
 
 const STORAGE_KEY = "tech-bid-checklists";
@@ -89,10 +140,11 @@ const TechnicalBidCheck = () => {
   const { user } = useAuth();
   const [checklists, setChecklists] = useState<CheckList[]>([]);
   const [activeListId, setActiveListId] = useState<string | null>(null);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(DEFAULT_CATEGORIES));
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [newItemMode, setNewItemMode] = useState(false);
   const [newItem, setNewItem] = useState({ category: "", title: "", description: "", severity: "major" as CheckItem["severity"] });
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   // Load from localStorage
   useEffect(() => {
@@ -115,19 +167,20 @@ const TechnicalBidCheck = () => {
 
   const activeList = checklists.find((c) => c.id === activeListId) || null;
 
-  const createNewChecklist = () => {
+  const createFromTemplate = (template: ChecklistTemplate) => {
     const id = genId();
     const newList: CheckList = {
       id,
-      name: `检查单 ${checklists.length + 1}`,
+      name: template.name,
       projectName: "",
-      items: DEFAULT_CHECK_ITEMS.map((item) => ({ ...item, id: genId() })),
+      items: template.items.map((item) => ({ ...item, id: genId() })),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     setChecklists((prev) => [newList, ...prev]);
     setActiveListId(id);
-    toast.success("已创建新的检查清单（含默认检查项）");
+    setShowTemplatePicker(false);
+    toast.success(`已基于「${template.name}」创建检查清单，共${template.items.length}个检查项`);
   };
 
   const deleteChecklist = (id: string) => {
@@ -301,17 +354,63 @@ const TechnicalBidCheck = () => {
             <h2 className="text-xl font-bold text-foreground">技术标质量检查</h2>
             <p className="text-sm text-muted-foreground mt-1">创建检查清单，逐项确认标书质量</p>
           </div>
-          <Button onClick={createNewChecklist} className="gap-1.5">
-            <Plus className="w-4 h-4" />
-            新建检查清单
-          </Button>
-          <label>
-            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} />
-            <Button variant="outline" className="gap-1.5" asChild>
-              <span><Upload className="w-4 h-4" />导入Excel</span>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setShowTemplatePicker(true)} className="gap-1.5">
+              <Plus className="w-4 h-4" />
+              新建检查清单
             </Button>
-          </label>
+            <label>
+              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} />
+              <Button variant="outline" className="gap-1.5" asChild>
+                <span><Upload className="w-4 h-4" />导入Excel</span>
+              </Button>
+            </label>
+          </div>
         </div>
+
+        {/* Template Picker Dialog */}
+        <Dialog open={showTemplatePicker} onOpenChange={setShowTemplatePicker}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>选择检查模板</DialogTitle>
+              <DialogDescription>选择一个内置模板快速创建检查清单，或上传Excel导入自定义检查项</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3 mt-2">
+              {BUILTIN_TEMPLATES.map((tpl) => (
+                <Card
+                  key={tpl.id}
+                  className="cursor-pointer hover:shadow-card-hover hover:border-primary/40 transition-all"
+                  onClick={() => createFromTemplate(tpl)}
+                >
+                  <CardContent className="flex items-start gap-4 p-4">
+                    <div className="rounded-lg bg-primary/10 p-2.5 mt-0.5">
+                      <BookTemplate className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-foreground">{tpl.name}</h4>
+                      <p className="text-xs text-muted-foreground mt-1">{tpl.description}</p>
+                      <Badge variant="secondary" className="mt-2 text-[10px]">{tpl.items.length} 个检查项</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+              <label>
+                <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { setShowTemplatePicker(false); handleExcelUpload(e); }} />
+                <Card className="cursor-pointer hover:shadow-card-hover hover:border-primary/40 transition-all border-dashed">
+                  <CardContent className="flex items-start gap-4 p-4">
+                    <div className="rounded-lg bg-muted p-2.5 mt-0.5">
+                      <Upload className="w-5 h-5 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-foreground">从Excel导入</h4>
+                      <p className="text-xs text-muted-foreground mt-1">上传包含「分类、检查项、说明、严重程度」列的Excel文件</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </label>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {checklists.length === 0 ? (
           <Card className="border-dashed">
@@ -319,9 +418,9 @@ const TechnicalBidCheck = () => {
               <ClipboardList className="w-12 h-12 text-muted-foreground/40 mb-4" />
               <h3 className="text-lg font-semibold text-foreground mb-2">暂无检查清单</h3>
               <p className="text-sm text-muted-foreground mb-6 max-w-md">
-                创建一份质量检查清单，系统将预置常用检查项，您也可以自定义添加
+                选择内置模板或上传Excel，快速创建质量检查清单
               </p>
-              <Button onClick={createNewChecklist} className="gap-1.5">
+              <Button onClick={() => setShowTemplatePicker(true)} className="gap-1.5">
                 <Plus className="w-4 h-4" />
                 创建第一份检查清单
               </Button>
