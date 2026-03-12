@@ -529,7 +529,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       <div key={section.id}>
         <div
           className={`flex items-start gap-1 rounded-lg transition-all ${
-            isDropTarget ? "bg-accent/20 ring-2 ring-accent" : ""
+            isDropTarget ? "bg-accent/15 ring-2 ring-accent ring-offset-1" : draggedMaterial ? "hover:bg-accent/10 hover:ring-1 hover:ring-accent/40" : ""
           }`}
           style={{ paddingLeft: depth * 16 }}
           onDragOver={(e) => handleDragOver(e, section.id)}
