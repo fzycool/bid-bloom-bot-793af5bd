@@ -205,7 +205,7 @@ const TechCheckProjects = () => {
     // 汇总提示
     const totalFiles = uploadFiles.length;
     if (successCount === totalFiles) {
-      toast.success(`🎉 全部上传成功！共上传 ${successCount} 个${categoryLabel}文件`);
+      toast.success(`🎉 全部上传成功！共上传 ${successCount} 个${categoryLabel}`);
     } else if (successCount > 0 && failCount > 0) {
       toast.warning(`⚠️ 部分上传成功：${successCount} 个成功，${failCount} 个失败`, {
         description: failedFiles.join("、"),
