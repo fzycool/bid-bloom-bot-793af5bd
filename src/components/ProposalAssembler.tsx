@@ -128,6 +128,62 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
 
   useEffect(() => { fetchMaterials(); }, [fetchMaterials]);
 
+  const decodeXmlText = (text: string) => text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"');
+
+  const extractDocxParagraphs = (docXml: string) => {
+    const cleanedXml = docXml
+      .replace(/<w:fldChar[^>]*w:fldCharType="begin"[^>]*\/>[\s\S]*?<w:fldChar[^>]*w:fldCharType="end"[^>]*\/>/g, "")
+      .replace(/<w:instrText[^>]*>[\s\S]*?<\/w:instrText>/g, "")
+      .replace(/<w:fldSimple[^>]*>([\s\S]*?)<\/w:fldSimple>/g, "$1");
+
+    const paragraphs: string[] = [];
+    const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+    let pMatch: RegExpExecArray | null;
+
+    while ((pMatch = pRe.exec(cleanedXml)) !== null) {
+      const pContent = pMatch[1];
+      if (/<w:pStyle[^>]*w:val="TOC/.test(pContent)) continue;
+
+      const textParts: string[] = [];
+      const tRe = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+      let tMatch: RegExpExecArray | null;
+      while ((tMatch = tRe.exec(pContent)) !== null) {
+        textParts.push(decodeXmlText(tMatch[1]));
+      }
+
+      const text = textParts.join(/<w:tab\/>/.test(pContent) ? "\t" : "").trim();
+      if (!text) continue;
+      if (/^PAGEREF\b/i.test(text)) continue;
+      paragraphs.push(text);
+    }
+
+    return paragraphs;
+  };
+
+  const buildWorkspaceContent = useCallback(async (mats: MaterialItem[]) => {
+    const blocks: string[] = [];
+
+    for (const mat of mats) {
+      const { data } = await supabase.storage.from("company-materials").download(mat.file_path);
+      if (!data) continue;
+      const zip = await JSZip.loadAsync(data);
+      const docXml = await zip.file("word/document.xml")?.async("string");
+      if (!docXml) continue;
+
+      const bodyText = extractDocxParagraphs(docXml).join("\n").trim();
+      if (bodyText) {
+        blocks.push(`【来源：公司材料库（原样移植） - ${mat.file_name}】\n${bodyText}`);
+      }
+    }
+
+    return blocks.join("\n\n").trim();
+  }, []);
+
   // Expand all sections by default
   useEffect(() => {
     const allIds = new Set<string>();
@@ -160,12 +216,10 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
       setAutoSaving(true);
       try {
         for (const [sectionId, mats] of entries) {
-          // Store material file paths as JSON metadata for XML-level export
-          const materialRefs = mats.map(m => ({ file_path: m.file_path, file_name: m.file_name }));
-          // Also generate a text preview for the workspace editor
-          let previewText = mats.map(m => `📄 ${m.file_name}`).join("\n");
+          const materialRefs = mats.map((m) => ({ file_path: m.file_path, file_name: m.file_name }));
+          const content = await buildWorkspaceContent(mats);
           await supabase.from("proposal_sections").update({
-            content: previewText,
+            content,
             source_type: "material_assembly",
             source_id: JSON.stringify(materialRefs),
           }).eq("id", sectionId);
@@ -181,7 +235,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [assembly]);
+  }, [assembly, buildWorkspaceContent]);
 
 
 
@@ -587,12 +641,12 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
 
     setDownloading(true);
     try {
-      // For each section with assigned materials, save material references for XML-level export
+      // For each section with assigned materials, save actual content + source metadata
       for (const [sectionId, mats] of Object.entries(assembly)) {
-        const materialRefs = mats.map(m => ({ file_path: m.file_path, file_name: m.file_name }));
-        const previewText = mats.map(m => `📄 ${m.file_name}`).join("\n");
+        const materialRefs = mats.map((m) => ({ file_path: m.file_path, file_name: m.file_name }));
+        const content = await buildWorkspaceContent(mats);
         await supabase.from("proposal_sections").update({
-          content: previewText,
+          content,
           source_type: "material_assembly",
           source_id: JSON.stringify(materialRefs),
         }).eq("id", sectionId);
