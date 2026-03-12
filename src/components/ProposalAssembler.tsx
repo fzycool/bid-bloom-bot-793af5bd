@@ -754,6 +754,7 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
                     </p>
                   )}
                   {scoredMaterials.map(({ mat, score }) => {
+                    const isAssignedToSelected = selectedSectionId ? (assembly[selectedSectionId] || []).some(m => m.id === mat.id) : false;
                     const isAssigned = Object.values(assembly).some(mats => mats.some(m => m.id === mat.id));
                     const isMatched = score > 0;
                     return (
@@ -783,9 +784,27 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
                             <Zap className="w-2.5 h-2.5" />{Math.min(score, 99)}
                           </Badge>
                         )}
-                        {isAssigned && (
+                        {isAssignedToSelected ? (
+                          <Badge variant="secondary" className="text-[10px] shrink-0">已添加</Badge>
+                        ) : selectedSectionId ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[10px] shrink-0 gap-1 border-accent/40 text-accent hover:bg-accent hover:text-accent-foreground"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAssembly(prev => {
+                                const existing = prev[selectedSectionId] || [];
+                                if (existing.some(m => m.id === mat.id)) return prev;
+                                return { ...prev, [selectedSectionId]: [...existing, mat] };
+                              });
+                            }}
+                          >
+                            <Plus className="w-3 h-3" />填入
+                          </Button>
+                        ) : isAssigned ? (
                           <Badge variant="secondary" className="text-[10px] shrink-0">已分配</Badge>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
