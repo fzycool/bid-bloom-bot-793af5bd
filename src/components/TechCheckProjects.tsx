@@ -139,27 +139,24 @@ const TechCheckProjects = () => {
     const categoryLabel = category === "bid_document" ? "招标文件" : "技术方案";
     let successCount = 0;
     let failCount = 0;
-    const failedFiles: string[] = [];
+    const failDetails: { name: string; reason: string }[] = [];
 
     for (const file of uploadFiles) {
       // Validate file type
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
       if (category === "bid_document" && !["pdf", "docx", "doc"].includes(ext)) {
-        toast.error(`「${file.name}」格式不支持，招标文件仅支持 PDF/Word`);
         failCount++;
-        failedFiles.push(file.name);
+        failDetails.push({ name: file.name, reason: `格式不支持（.${ext}），仅支持 PDF/Word` });
         continue;
       }
       if (category === "technical_proposal" && !["docx", "doc"].includes(ext)) {
-        toast.error(`「${file.name}」格式不支持，技术方案仅支持 Word`);
         failCount++;
-        failedFiles.push(file.name);
+        failDetails.push({ name: file.name, reason: `格式不支持（.${ext}），仅支持 Word` });
         continue;
       }
       if (file.size > 50 * 1024 * 1024) {
-        toast.error(`「${file.name}」超过50MB限制`);
         failCount++;
-        failedFiles.push(file.name);
+        failDetails.push({ name: file.name, reason: `文件大小 ${formatSize(file.size)} 超过 50MB 限制` });
         continue;
       }
 
@@ -169,9 +166,8 @@ const TechCheckProjects = () => {
         .upload(storagePath, file, { contentType: file.type });
 
       if (uploadErr) {
-        toast.error(`上传「${file.name}」失败: ${uploadErr.message}`);
         failCount++;
-        failedFiles.push(file.name);
+        failDetails.push({ name: file.name, reason: `存储上传失败：${uploadErr.message}` });
         continue;
       }
 
@@ -190,9 +186,8 @@ const TechCheckProjects = () => {
         .single();
 
       if (insertErr) {
-        toast.error(`保存记录失败: ${insertErr.message}`);
         failCount++;
-        failedFiles.push(file.name);
+        failDetails.push({ name: file.name, reason: `记录保存失败：${insertErr.message}` });
         continue;
       }
 
@@ -202,17 +197,21 @@ const TechCheckProjects = () => {
 
     setUploading(null);
 
-    // 汇总提示
+    // 汇总提示（含失败原因）
     const totalFiles = uploadFiles.length;
+    const failDescription = failDetails.map((d) => `• ${d.name}：${d.reason}`).join("\n");
+
     if (successCount === totalFiles) {
       toast.success(`🎉 全部上传成功！共上传 ${successCount} 个${categoryLabel}`);
     } else if (successCount > 0 && failCount > 0) {
-      toast.warning(`⚠️ 部分上传成功：${successCount} 个成功，${failCount} 个失败`, {
-        description: failedFiles.join("、"),
+      toast.warning(`⚠️ ${successCount} 个上传成功，${failCount} 个失败`, {
+        description: failDescription,
+        duration: 8000,
       });
     } else {
       toast.error(`❌ 上传失败！${failCount} 个文件未能上传`, {
-        description: failedFiles.join("、"),
+        description: failDescription,
+        duration: 8000,
       });
     }
   };
