@@ -583,16 +583,20 @@ export default function ProposalAssembler({ proposalId, sections, onEnterWorkspa
           </div>
         )}
 
-        {/* Drop hint when dragging */}
-        {draggedMaterial && assignedMats.length === 0 && !hasChildren && (
+        {/* Drop hint only visible while actively dragging over this section */}
+        {draggedMaterial && (
           <div
-            className="ml-8 mb-1 border-2 border-dashed border-muted-foreground/20 rounded-lg px-3 py-2 text-xs text-muted-foreground text-center"
+            className={`ml-8 mb-1 rounded-lg px-3 py-1.5 text-xs text-center transition-all ${
+              isDropTarget
+                ? "border-2 border-dashed border-accent bg-accent/10 text-accent"
+                : "border border-dashed border-transparent text-transparent h-0 py-0 overflow-hidden"
+            }`}
             style={{ paddingLeft: depth * 16 }}
             onDragOver={(e) => handleDragOver(e, section.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, section.id)}
           >
-            拖放材料到此处
+            松开以添加到此章节
           </div>
         )}
 
