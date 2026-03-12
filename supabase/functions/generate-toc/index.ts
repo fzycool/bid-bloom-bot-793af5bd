@@ -195,7 +195,10 @@ async function generateToc(supabase: any, proposalId: string, resume = false) {
     // 2. Get AI config
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const modelConfig = await getAiConfig(supabase);
-    const aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    let aiUrl = modelConfig?.base_url || "https://ai.gateway.lovable.dev/v1/chat/completions";
+    if (modelConfig?.base_url && !aiUrl.endsWith("/chat/completions")) {
+      aiUrl = aiUrl.replace(/\/+$/, "") + "/chat/completions";
+    }
     const aiModel = modelConfig?.model_name || "google/gemini-2.5-flash";
     const aiKey = modelConfig?.api_key || LOVABLE_API_KEY || "";
 
