@@ -26,6 +26,7 @@ import {
   Pause,
   Play,
   XCircle,
+  Download,
 } from "lucide-react";
 
 interface StructureSection {
