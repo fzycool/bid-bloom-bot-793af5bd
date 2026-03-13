@@ -446,7 +446,7 @@ export async function exportBidParserDesignDoc() {
 
           h3("5.3.1 三级回退章节识别策略"),
           p("Level 1: 正则TOC解析 (extractTocFromText)", true),
-          bullet("搜索"目录"关键字（支持空格变体如 '目 录'、'目　录'）"),
+          bullet("搜索\u201C目录\u201D关键字（支持空格变体如 '目 录'、'目　录'）"),
           bullet("从目录区域提取条目，扫描范围最大50,000字符"),
           bullet("6种TOC格式正则："),
           bullet("  - 第X章/第X部分/第X节", 1),
