@@ -1179,10 +1179,6 @@ export default function BidParser() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => exportBidParserDesignDoc()} className="gap-2">
-            <Download className="w-4 h-4" />
-            导出设计文档
-          </Button>
           <Button onClick={() => setShowForm(!showForm)} className="gap-2">
             <Plus className="w-4 h-4" />
             新建解析
