@@ -127,10 +127,20 @@ interface BidAnalysisItem {
   ai_status: string;
 }
 
+function countNodes(tree: any[]): number {
+  let count = 0;
+  for (const node of tree) {
+    count += 1;
+    if (node.children) count += countNodes(node.children);
+  }
+  return count;
+}
+
 export default function BiddingAssistantPlus() {
   const { user } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [autoParseLoading, setAutoParseLoading] = useState(false);
 
   const [docContent, setDocContent] = useState<DocContent>({ type: "empty" });
   const [plainText, setPlainText] = useState("");
@@ -294,6 +304,52 @@ export default function BiddingAssistantPlus() {
     }
   };
 
+  // Auto-parse: AI extracts outline from document
+  const handleAutoParse = useCallback(async (customPrompt?: string) => {
+    if (!plainText) {
+      toast({ title: "请先上传招标文件", variant: "destructive" });
+      return;
+    }
+    setAutoParseLoading(true);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/parse-outline`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({
+          documentText: plainText.slice(0, 30000),
+          customPrompt,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "解析失败");
+      }
+
+      const data = await response.json();
+      if (data.tree && Array.isArray(data.tree)) {
+        outline.replaceTree(data.tree);
+        toast({ title: "大纲解析完成", description: `共提取 ${countNodes(data.tree)} 个节点` });
+      } else {
+        throw new Error("返回格式异常");
+      }
+    } catch (err: any) {
+      toast({ title: "自动解析失败", description: err.message, variant: "destructive" });
+    } finally {
+      setAutoParseLoading(false);
+    }
+  }, [plainText, outline, toast]);
+
+  const handleImportOutline = useCallback(() => {
+    toast({ title: "大纲导入", description: "功能开发中，敬请期待" });
+  }, [toast]);
+
   const hasDocument = docContent.type !== "empty" && docContent.type !== "loading";
 
   return (
@@ -372,6 +428,10 @@ export default function BiddingAssistantPlus() {
               onPromote={outline.promoteNode}
               onDemote={outline.demoteNode}
               onAutoNumber={outline.doAutoNumber}
+              onAutoParse={handleAutoParse}
+              onImportOutline={handleImportOutline}
+              autoParseLoading={autoParseLoading}
+              hasDocument={hasDocument}
             />
           </div>
         </Card>

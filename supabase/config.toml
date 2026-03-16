@@ -38,3 +38,9 @@ verify_jwt = false
 
 [functions.techcheck-quality]
 verify_jwt = false
+
+[functions.parse-outline]
+verify_jwt = false
+
+[functions.outline-ai-command]
+verify_jwt = false
