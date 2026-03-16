@@ -308,6 +308,7 @@ export type Database = {
           file_path: string
           file_size: number
           file_type: string | null
+          folder_id: string | null
           id: string
           issued_at: string | null
           issuing_authority: string | null
@@ -327,6 +328,7 @@ export type Database = {
           file_path: string
           file_size?: number
           file_type?: string | null
+          folder_id?: string | null
           id?: string
           issued_at?: string | null
           issuing_authority?: string | null
@@ -346,6 +348,7 @@ export type Database = {
           file_path?: string
           file_size?: number
           file_type?: string | null
+          folder_id?: string | null
           id?: string
           issued_at?: string | null
           issuing_authority?: string | null
@@ -359,6 +362,13 @@ export type Database = {
             columns: ["bid_analysis_id"]
             isOneToOne: false
             referencedRelation: "bid_analyses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_materials_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "material_folders"
             referencedColumns: ["id"]
           },
         ]
@@ -515,6 +525,44 @@ export type Database = {
           years_of_experience?: number | null
         }
         Relationships: []
+      }
+      material_folders: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          parent_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+          parent_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          parent_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "material_folders"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       model_config: {
         Row: {
