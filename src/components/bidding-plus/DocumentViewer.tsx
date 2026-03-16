@@ -139,7 +139,7 @@ export default function DocumentViewer({ content, onAddFromSelection, highlightT
       const nodesToProcess: { node: Text; index: number }[] = [];
 
       let textNode: Text | null;
-      while ((textNode = walker.nextText()) as Text | null) {
+      while ((textNode = walker.nextNode() as Text | null)) {
         if (!textNode) break;
         const text = textNode.textContent || "";
         const idx = text.indexOf(searchText);

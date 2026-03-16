@@ -29,6 +29,7 @@ serve(async (req) => {
       "section_number": "第一章",
       "sort_order": 0,
       "parent_id": null,
+      "source_text": "从原文中摘录的该章节标题原始文字",
       "children": [
         {
           "id": "new_1_1",
@@ -36,6 +37,7 @@ serve(async (req) => {
           "section_number": "1.1",
           "sort_order": 0,
           "parent_id": "new_1",
+          "source_text": "从原文中摘录的该小节标题原始文字",
           "children": []
         }
       ]
@@ -48,7 +50,8 @@ serve(async (req) => {
 2. 严格从文档中提取，不要虚构章节
 3. 保留原始章节编号
 4. 按文档中出现的顺序排列
-5. 只返回JSON，不要其他内容`;
+5. 只返回JSON，不要其他内容
+6. 每个节点必须包含 source_text 字段，值为该章节标题在原文中的原始文字（用于在文档中高亮定位），尽量与原文完全一致`;
 
     const userPrompt = `${customPrompt || "请提取文档的完整大纲结构"}\n\n--- 招标文件内容 ---\n${documentText}`;
 
