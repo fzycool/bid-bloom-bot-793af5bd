@@ -303,11 +303,11 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                     />
                   </TableHead>
                 )}
-                <TableHead>文件名</TableHead>
-                <TableHead className="hidden md:table-cell">类型</TableHead>
-                <TableHead className="hidden md:table-cell w-28">有效期</TableHead>
-                <TableHead className="w-20">大小</TableHead>
-                <TableHead className="w-16">操作</TableHead>
+                <TableHead className="w-auto">文件名</TableHead>
+                <TableHead className="hidden md:table-cell w-20 whitespace-nowrap">类型</TableHead>
+                <TableHead className="hidden md:table-cell w-24 whitespace-nowrap">有效期</TableHead>
+                <TableHead className="w-16 whitespace-nowrap">大小</TableHead>
+                <TableHead className="w-14">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
