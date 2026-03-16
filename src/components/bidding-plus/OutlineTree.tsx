@@ -2,15 +2,23 @@ import React, { useState, useRef, useCallback } from "react";
 import {
   GripVertical, ChevronRight, ChevronDown, Pencil, Trash2,
   Check, X, Plus, ArrowUpRight, ArrowDownRight, ListOrdered,
+  ScanSearch, ChevronDownIcon, FolderInput, Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem,
   ContextMenuTrigger, ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 import type { FlatOutlineItem, DropPosition } from "./types";
 
 interface OutlineTreeProps {
@@ -27,6 +35,10 @@ interface OutlineTreeProps {
   onPromote: (id: string) => void;
   onDemote: (id: string) => void;
   onAutoNumber: () => void;
+  onAutoParse: (customPrompt?: string) => void;
+  onImportOutline: () => void;
+  autoParseLoading?: boolean;
+  hasDocument?: boolean;
 }
 
 export default function OutlineTree({
