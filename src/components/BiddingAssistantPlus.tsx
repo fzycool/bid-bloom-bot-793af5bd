@@ -128,7 +128,9 @@ interface BidAnalysisItem {
   document_structure?: any;
 }
 
-function countNodes(tree: any[]): number {
+let _fwId = 1;
+const genId = () => `fw_${Date.now()}_${_fwId++}`;
+
   let count = 0;
   for (const node of tree) {
     count += 1;
