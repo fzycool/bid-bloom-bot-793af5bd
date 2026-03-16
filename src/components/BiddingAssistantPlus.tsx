@@ -223,7 +223,57 @@ export default function BiddingAssistantPlus() {
     }
   }, [toast, loadBlob]);
 
-  // Local file upload
+  // Load document structure as outline framework
+  const handleLoadFramework = useCallback((item: BidAnalysisItem) => {
+    if (!item.document_structure) {
+      toast({ title: "该项目尚无文档结构", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const structure = typeof item.document_structure === "string"
+        ? JSON.parse(item.document_structure)
+        : item.document_structure;
+
+      // Convert document_structure chapters to OutlineNode[]
+      const convertToNodes = (chapters: any[], parentId: string | null = null): any[] => {
+        if (!Array.isArray(chapters)) return [];
+        return chapters.map((ch: any, i: number) => {
+          const id = genId();
+          const title = ch.title || ch.name || ch.chapter_title || `章节 ${i + 1}`;
+          const sectionNumber = ch.section_number || ch.number || null;
+          const children = ch.children || ch.sub_chapters || ch.sections || [];
+          return {
+            id,
+            title: sectionNumber ? `${sectionNumber} ${title}` : title,
+            section_number: sectionNumber,
+            sort_order: i,
+            parent_id: parentId,
+            children: convertToNodes(children, id),
+            source_text: ch.source_text || title,
+          };
+        });
+      };
+
+      // Handle different possible structure formats
+      const chapters = Array.isArray(structure)
+        ? structure
+        : structure.chapters || structure.sections || structure.toc || [];
+
+      const tree = convertToNodes(chapters);
+      if (tree.length === 0) {
+        toast({ title: "文档结构为空", variant: "destructive" });
+        return;
+      }
+
+      outline.replaceTree(tree);
+      setFrameworkDialogOpen(false);
+      toast({ title: "文件框架已载入", description: `共 ${countNodes(tree)} 个节点` });
+    } catch (err: any) {
+      toast({ title: "载入框架失败", description: err.message, variant: "destructive" });
+    }
+  }, [outline, toast]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
