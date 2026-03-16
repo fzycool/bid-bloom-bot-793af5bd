@@ -292,7 +292,7 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
             <p className="text-xs mt-1">点击上传按钮添加材料</p>
           </div>
         ) : (
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 {isAdmin && (
@@ -303,11 +303,11 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                     />
                   </TableHead>
                 )}
-                <TableHead className="w-auto">文件名</TableHead>
-                <TableHead className="hidden md:table-cell w-20 whitespace-nowrap">类型</TableHead>
-                <TableHead className="hidden md:table-cell w-24 whitespace-nowrap">有效期</TableHead>
-                <TableHead className="w-16 whitespace-nowrap">大小</TableHead>
-                <TableHead className="w-14">操作</TableHead>
+                <TableHead className="w-[62%]">文件名</TableHead>
+                <TableHead className="hidden md:table-cell w-[88px] whitespace-nowrap">类型</TableHead>
+                <TableHead className="hidden md:table-cell w-[112px] whitespace-nowrap">有效期</TableHead>
+                <TableHead className="w-[76px] whitespace-nowrap">大小</TableHead>
+                <TableHead className="w-[60px] whitespace-nowrap">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -328,7 +328,7 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                         />
                       </TableCell>
                     )}
-                    <TableCell>
+                    <TableCell className="max-w-0">
                       <div className="flex items-center gap-2 min-w-0">
                         {isImageFile(mat) ? (
                           <div className="w-8 h-8 rounded border overflow-hidden shrink-0 bg-muted">
@@ -342,7 +342,7 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                         ) : (
                           <FileText className="w-4 h-4 shrink-0 text-muted-foreground" />
                         )}
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate">{mat.file_name}</p>
                           {mat.content_description && (
                             <p className="text-xs text-muted-foreground truncate">{mat.content_description}</p>
@@ -350,17 +350,17 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {mat.material_type && <Badge variant="secondary" className="text-xs">{mat.material_type}</Badge>}
+                    <TableCell className="hidden md:table-cell whitespace-nowrap">
+                      {mat.material_type && <Badge variant="secondary" className="text-xs whitespace-nowrap">{mat.material_type}</Badge>}
                     </TableCell>
-                    <TableCell className="hidden md:table-cell">
+                    <TableCell className="hidden md:table-cell whitespace-nowrap">
                       {expiry ? (
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium ${expiry.color}`}>
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${expiry.color}`}>
                           {ExpiryIcon && <ExpiryIcon className="w-3 h-3" />}
                           {expiry.label}
                         </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">-</span>
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatSize(mat.file_size)}</TableCell>
