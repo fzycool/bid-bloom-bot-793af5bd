@@ -201,11 +201,7 @@ export default function OutlineTree({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      setCustomPrompt(
-                        "请根据招标文件内容，提取完整的投标文件大纲结构。要求：\n1. 严格按照招标文件中的章节结构和编号\n2. 包含所有必须响应的章节\n3. 保留原始章节编号格式"
-                      )
-                    }
+                    onClick={() => savePrompt(DEFAULT_PROMPT)}
                   >
                     重置默认
                   </Button>
