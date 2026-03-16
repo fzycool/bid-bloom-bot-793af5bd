@@ -429,25 +429,21 @@ export default function BiddingAssistantPlus() {
             <FolderOpen className="w-4 h-4 mr-1" />
             载入招标文件
           </Button>
+          <input
+            ref={frameworkInputRef}
+            type="file"
+            accept=".pdf,.docx,.doc,.txt"
+            className="hidden"
+            onChange={handleFrameworkUpload}
+          />
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              fetchBidAnalyses();
-              setFrameworkDialogOpen(true);
-            }}
+            onClick={() => frameworkInputRef.current?.click()}
+            disabled={frameworkLoading}
           >
-            <ListTree className="w-4 h-4 mr-1" />
+            {frameworkLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <ListTree className="w-4 h-4 mr-1" />}
             载入文件框架
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
-            本地上传
           </Button>
           <Button
             variant="outline"
