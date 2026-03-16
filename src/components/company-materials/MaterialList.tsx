@@ -524,6 +524,37 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Move dialog */}
+      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>移动到目录</DialogTitle>
+          </DialogHeader>
+          <div className="border rounded-md max-h-[300px] overflow-y-auto py-1">
+            {/* Root / uncategorized */}
+            <div
+              className={cn(
+                "flex items-center gap-1.5 py-1.5 px-2 rounded-md cursor-pointer text-sm transition-colors mx-1",
+                moveTargetId === null ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+              )}
+              onClick={() => setMoveTargetId(null)}
+            >
+              <span className="w-[18px] shrink-0" />
+              <Building2 className="w-4 h-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">未分类</span>
+            </div>
+            {buildFolderTree(null).map((f) => renderMoveFolderNode(f, 0))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setMoveDialogOpen(false)}>取消</Button>
+            <Button size="sm" onClick={handleBatchMove} disabled={moving} className="gap-1">
+              {moving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              确认移动
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
