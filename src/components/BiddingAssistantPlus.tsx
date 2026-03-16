@@ -169,7 +169,7 @@ export default function BiddingAssistantPlus() {
     try {
       const { data, error } = await supabase
         .from("bid_analyses")
-        .select("id, project_name, file_path, created_at, ai_status")
+        .select("id, project_name, file_path, created_at, ai_status, document_structure")
         .order("created_at", { ascending: false });
       if (error) throw error;
       setBidAnalyses(data || []);
