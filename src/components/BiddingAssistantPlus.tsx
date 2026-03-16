@@ -151,6 +151,7 @@ export default function BiddingAssistantPlus() {
 
   // Load from bid analyses
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
+  const [frameworkDialogOpen, setFrameworkDialogOpen] = useState(false);
   const [bidAnalyses, setBidAnalyses] = useState<BidAnalysisItem[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
