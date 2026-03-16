@@ -21,79 +21,66 @@ function PdfPage({ pdf, pageNum }: { pdf: any; pageNum: number }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const page = await pdf.getPage(pageNum);
-      const scale = 2;
-      const viewport = page.getViewport({ scale });
+      try {
+        const page = await pdf.getPage(pageNum);
+        const scale = 2;
+        const viewport = page.getViewport({ scale });
 
-      if (cancelled || !containerRef.current) return;
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = "";
 
-      // Clear previous renders
-      containerRef.current.innerHTML = "";
+        // Canvas layer
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = "100%";
+        canvas.style.height = "auto";
+        canvas.style.display = "block";
+        const ctx = canvas.getContext("2d")!;
+        await page.render({ canvasContext: ctx, viewport }).promise;
 
-      // Canvas layer
-      const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.width = "100%";
-      canvas.style.height = "auto";
-      canvas.style.display = "block";
-      const ctx = canvas.getContext("2d")!;
-      await page.render({ canvasContext: ctx, viewport }).promise;
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.appendChild(canvas);
 
-      if (cancelled || !containerRef.current) return;
-      containerRef.current.appendChild(canvas);
+        // Text layer for selection
+        const textContent = await page.getTextContent();
+        const textDiv = document.createElement("div");
+        textDiv.className = "textLayer";
 
-      // Text layer for selection
-      const textContent = await page.getTextContent();
-      const textDiv = document.createElement("div");
-      textDiv.style.position = "absolute";
-      textDiv.style.left = "0";
-      textDiv.style.top = "0";
-      textDiv.style.right = "0";
-      textDiv.style.bottom = "0";
-      textDiv.style.overflow = "hidden";
-      textDiv.style.lineHeight = "1";
+        const vp1 = page.getViewport({ scale: 1 });
+        textDiv.style.width = vp1.width + "px";
+        textDiv.style.height = vp1.height + "px";
+        textDiv.style.setProperty("--scale-factor", "1");
 
-      // We need to scale text layer to match the displayed size
-      // The canvas is rendered at `scale` but displayed at 100% width
-      // So the text layer coords need to be scaled by (1/scale) relative to viewport
-      const pdfjsLib = await import("pdfjs-dist");
-      // @ts-ignore - TextLayer API
-      const textLayer = new pdfjsLib.TextLayer({
-        textContentSource: textContent,
-        container: textDiv,
-        viewport: page.getViewport({ scale: 1 }),
-      });
-      await textLayer.render();
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.appendChild(textDiv);
 
-      // Scale the text div to match actual display size
-      // Viewport at scale=1 gives us the "CSS pixel" dimensions of the PDF page
-      const vp1 = page.getViewport({ scale: 1 });
-      textDiv.style.width = vp1.width + "px";
-      textDiv.style.height = vp1.height + "px";
-      textDiv.style.transformOrigin = "top left";
-      // The container will be sized by the canvas at 100% width
-      // So we need to scale the text layer to fill that same space
-      // We'll use a ResizeObserver to adjust
+        // Use the TextLayer class from pdfjs-dist v4+
+        const pdfjsLib = await import("pdfjs-dist");
+        // @ts-ignore
+        const textLayer = new pdfjsLib.TextLayer({
+          textContentSource: textContent,
+          container: textDiv,
+          viewport: vp1,
+        });
+        await textLayer.render();
 
-      if (cancelled || !containerRef.current) return;
-      containerRef.current.appendChild(textDiv);
+        // Scale the text div to match actual display size
+        const adjustScale = () => {
+          if (!containerRef.current || !canvas) return;
+          const displayWidth = canvas.getBoundingClientRect().width;
+          const ratio = displayWidth / vp1.width;
+          textDiv.style.transformOrigin = "top left";
+          textDiv.style.transform = `scale(${ratio})`;
+        };
+        adjustScale();
 
-      // Adjust text layer scale to match canvas display size
-      const adjustScale = () => {
-        if (!containerRef.current || !canvas) return;
-        const displayWidth = canvas.getBoundingClientRect().width;
-        const ratio = displayWidth / vp1.width;
-        textDiv.style.transform = `scale(${ratio})`;
-      };
-      adjustScale();
-
-      const observer = new ResizeObserver(adjustScale);
-      observer.observe(containerRef.current);
-
-      // Cleanup
-      const cleanup = () => observer.disconnect();
-      (containerRef.current as any).__cleanup = cleanup;
+        const observer = new ResizeObserver(adjustScale);
+        observer.observe(containerRef.current);
+        (containerRef.current as any).__cleanup = () => observer.disconnect();
+      } catch (err) {
+        console.error(`Error rendering PDF page ${pageNum}:`, err);
+      }
     })();
 
     return () => {
@@ -118,8 +105,8 @@ export default function DocumentViewer({ content, onAddFromSelection }: Document
   const [floatingBtn, setFloatingBtn] = useState<{ x: number; y: number; text: string } | null>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-  // Load PDF document when content changes
   useEffect(() => {
     if (content.type !== "pdf") {
       setPdfDoc(null);
@@ -127,13 +114,20 @@ export default function DocumentViewer({ content, onAddFromSelection }: Document
       return;
     }
     let cancelled = false;
+    setPdfLoading(true);
     (async () => {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-      const pdf = await pdfjsLib.getDocument({ data: content.data.slice(0) }).promise;
-      if (!cancelled) {
-        setPdfDoc(pdf);
-        setPdfPageCount(pdf.numPages);
+      try {
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+        const pdf = await pdfjsLib.getDocument({ data: content.data.slice(0) }).promise;
+        if (!cancelled) {
+          setPdfDoc(pdf);
+          setPdfPageCount(pdf.numPages);
+        }
+      } catch (err) {
+        console.error("Failed to load PDF:", err);
+      } finally {
+        if (!cancelled) setPdfLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -198,6 +192,13 @@ export default function DocumentViewer({ content, onAddFromSelection }: Document
         />
       )}
 
+      {content.type === "pdf" && pdfLoading && (
+        <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-3">
+          <Loader2 className="w-6 h-6 animate-spin" />
+          <p>正在加载 PDF...</p>
+        </div>
+      )}
+
       {content.type === "pdf" && pdfDoc && (
         <div className="p-4 space-y-2">
           {Array.from({ length: pdfPageCount }, (_, i) => (
@@ -221,7 +222,6 @@ export default function DocumentViewer({ content, onAddFromSelection }: Document
         </div>
       )}
 
-      {/* Floating "+" button on text selection */}
       {floatingBtn && (
         <div
           className="absolute z-20 animate-in fade-in zoom-in-95 duration-150"
