@@ -110,7 +110,7 @@ export default function DocumentViewer({ content, onAddFromSelection, highlightT
 
   // Highlight and scroll to matching text when highlightText changes
   useEffect(() => {
-    if (!highlightText || !containerRef.current) return;
+    if (!containerRef.current) return;
 
     // Clear previous highlights
     containerRef.current.querySelectorAll(".outline-highlight").forEach((el) => {
@@ -121,62 +121,46 @@ export default function DocumentViewer({ content, onAddFromSelection, highlightT
       }
     });
 
-    const searchText = highlightText.trim();
+    if (!highlightText?.trim()) return;
+    const searchText = highlightText.trim().replace(/\s+/g, "");
     if (!searchText) return;
 
-    // Small delay to ensure DOM is ready
     const timer = setTimeout(() => {
       if (!containerRef.current) return;
 
-      // Walk all text nodes and find matches
+      // Collect all text nodes with their positions in concatenated string
       const walker = document.createTreeWalker(
         containerRef.current,
         NodeFilter.SHOW_TEXT,
         null
       );
 
-      let firstMatch: HTMLElement | null = null;
-      const nodesToProcess: { node: Text; index: number }[] = [];
+      const textNodes: { node: Text; start: number; end: number }[] = [];
+      let fullText = "";
 
-      let textNode: Text | null;
-      while ((textNode = walker.nextNode() as Text | null)) {
-        if (!textNode) break;
-        const text = textNode.textContent || "";
-        const idx = text.indexOf(searchText);
-        if (idx !== -1) {
-          nodesToProcess.push({ node: textNode, index: idx });
-        }
+      let node: Text | null;
+      while ((node = walker.nextNode() as Text | null)) {
+        const t = node.textContent || "";
+        // Normalize: remove whitespace for matching
+        const normalized = t.replace(/\s+/g, "");
+        if (!normalized) continue;
+        textNodes.push({ node, start: fullText.length, end: fullText.length + normalized.length });
+        fullText += normalized;
       }
 
-      // Process matches (in reverse to maintain DOM positions)
-      for (let i = nodesToProcess.length - 1; i >= 0; i--) {
-        const { node, index } = nodesToProcess[i];
-        const range = document.createRange();
-        range.setStart(node, index);
-        range.setEnd(node, index + searchText.length);
-
-        const mark = document.createElement("mark");
-        mark.className = "outline-highlight";
-        mark.style.backgroundColor = "hsl(var(--accent) / 0.35)";
-        mark.style.borderRadius = "2px";
-        mark.style.padding = "1px 0";
-        mark.style.transition = "background-color 0.3s";
-
-        range.surroundContents(mark);
-
-        if (!firstMatch) firstMatch = mark;
+      // Find match in concatenated text
+      const matchIdx = fullText.indexOf(searchText);
+      if (matchIdx === -1) {
+        // Fallback: try shorter prefix (first 10 chars)
+        const shortSearch = searchText.slice(0, Math.min(10, searchText.length));
+        const shortIdx = fullText.indexOf(shortSearch);
+        if (shortIdx === -1) return;
+        highlightRange(textNodes, shortIdx, shortIdx + shortSearch.length, containerRef.current);
+        return;
       }
 
-      // Scroll to first match
-      if (firstMatch) {
-        firstMatch.scrollIntoView({ behavior: "smooth", block: "center" });
-        // Flash effect
-        firstMatch.style.backgroundColor = "hsl(var(--accent) / 0.6)";
-        setTimeout(() => {
-          if (firstMatch) firstMatch.style.backgroundColor = "hsl(var(--accent) / 0.35)";
-        }, 1000);
-      }
-    }, 100);
+      highlightRange(textNodes, matchIdx, matchIdx + searchText.length, containerRef.current);
+    }, 200);
 
     return () => clearTimeout(timer);
   }, [highlightText]);
