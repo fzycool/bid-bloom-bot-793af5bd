@@ -147,6 +147,7 @@ const Dashboard = () => {
           {activeModule === "compare" && <BidComparison />}
           {activeModule === "resume" && <ResumeFactory />}
           {activeModule === "bid" && <BiddingAssistant />}
+          {activeModule === "bid-plus" && <BiddingAssistantPlus />}
           {activeModule === "audit" && <HolographicAudit />}
           {activeModule === "materials" && <CompanyMaterials />}
           {activeModule === "templates" && <ResumeTemplates />}
