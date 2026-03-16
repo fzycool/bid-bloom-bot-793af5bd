@@ -15,6 +15,67 @@ interface DocumentViewerProps {
   highlightText?: string | null;
 }
 
+/** Highlight a range of characters across multiple text nodes and scroll to it */
+function highlightRange(
+  textNodes: { node: Text; start: number; end: number }[],
+  matchStart: number,
+  matchEnd: number,
+  container: HTMLElement
+) {
+  let firstMark: HTMLElement | null = null;
+
+  // Find which text nodes overlap with [matchStart, matchEnd)
+  // We need to map normalized positions back to actual text node positions
+  // Process in reverse to preserve DOM indices
+  const overlapping = textNodes
+    .map((tn, i) => ({ ...tn, idx: i }))
+    .filter((tn) => tn.start < matchEnd && tn.end > matchStart)
+    .reverse();
+
+  for (const tn of overlapping) {
+    const nodeText = tn.node.textContent || "";
+    // Map normalized offsets back to actual character positions in the node
+    let normPos = tn.start;
+    const charStart = Math.max(0, matchStart - tn.start);
+    const charEnd = Math.min(tn.end - tn.start, matchEnd - tn.start);
+
+    // Convert normalized positions to actual positions (accounting for whitespace)
+    let actualStart = 0;
+    let actualEnd = 0;
+    let normCount = 0;
+    for (let i = 0; i < nodeText.length; i++) {
+      if (/\s/.test(nodeText[i])) continue;
+      if (normCount === charStart) actualStart = i;
+      normCount++;
+      if (normCount === charEnd) { actualEnd = i + 1; break; }
+    }
+    if (actualEnd <= actualStart) continue;
+
+    try {
+      const range = document.createRange();
+      range.setStart(tn.node, actualStart);
+      range.setEnd(tn.node, actualEnd);
+
+      const mark = document.createElement("mark");
+      mark.className = "outline-highlight";
+      mark.style.backgroundColor = "hsl(var(--accent) / 0.4)";
+      mark.style.borderRadius = "2px";
+      mark.style.transition = "background-color 0.3s";
+
+      range.surroundContents(mark);
+      if (!firstMark) firstMark = mark;
+    } catch { /* skip nodes that can't be wrapped */ }
+  }
+
+  if (firstMark) {
+    firstMark.scrollIntoView({ behavior: "smooth", block: "center" });
+    firstMark.style.backgroundColor = "hsl(var(--accent) / 0.7)";
+    setTimeout(() => {
+      if (firstMark) firstMark.style.backgroundColor = "hsl(var(--accent) / 0.4)";
+    }, 1200);
+  }
+}
+
 /** Renders a single PDF page: canvas + transparent text layer for selection */
 function PdfPage({ pdf, pageNum }: { pdf: any; pageNum: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
