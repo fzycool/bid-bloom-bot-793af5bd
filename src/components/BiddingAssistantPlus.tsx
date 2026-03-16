@@ -443,6 +443,17 @@ export default function BiddingAssistantPlus() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => {
+              fetchBidAnalyses();
+              setFrameworkDialogOpen(true);
+            }}
+          >
+            <ListTree className="w-4 h-4 mr-1" />
+            载入文件框架
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
           >
