@@ -417,7 +417,15 @@ export default function BiddingAssistantPlus() {
             type="file"
             accept=".pdf,.docx,.txt"
             className="hidden"
-            onChange={handleFileUpload}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setLoading(true);
+              loadBlob(file, file.name, file.name)
+                .then(() => toast({ title: "文件已加载", description: file.name }))
+                .catch((err: any) => toast({ title: "文件解析失败", description: err.message, variant: "destructive" }))
+                .finally(() => { setLoading(false); if (fileInputRef.current) fileInputRef.current.value = ""; });
+            }}
           />
           <Button
             variant="outline"
