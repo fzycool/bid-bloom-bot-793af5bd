@@ -79,8 +79,11 @@ async function parseDocumentBlob(
     const pdfjsLib = await import("pdfjs-dist");
     pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
-    const arrayBuffer = await blob.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const renderBuffer = await blob.arrayBuffer();
+    // IMPORTANT: pdf.js 可能会转移(transfer)传入的 ArrayBuffer，
+    // 所以提取文本时使用副本，避免把用于右侧渲染的 buffer 变成 detached。
+    const extractionBuffer = renderBuffer.slice(0);
+    const pdf = await pdfjsLib.getDocument({ data: extractionBuffer }).promise;
 
     const textParts: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -92,7 +95,7 @@ async function parseDocumentBlob(
 
     const plainText = textParts.join("\n\n");
     return {
-      content: { type: "pdf" as const, data: arrayBuffer, plainText },
+      content: { type: "pdf" as const, data: renderBuffer, plainText },
       plainText,
     };
   }
