@@ -141,9 +141,85 @@ export default function OutlineTree({
   // Count children for collapsed badge
   const childCount = (id: string) => flatItems.filter((f) => f.parent_id === id).length;
 
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState(
+    "请根据招标文件内容，提取完整的投标文件大纲结构。要求：\n1. 严格按照招标文件中的章节结构和编号\n2. 包含所有必须响应的章节\n3. 保留原始章节编号格式"
+  );
+
   return (
     <div className="space-y-0.5">
-      <div className="flex justify-end mb-2">
+      <div className="flex justify-end gap-1.5 mb-2 flex-wrap">
+        {/* 自动解析 button group */}
+        <div className="flex items-center">
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-r-none border-r-0"
+            onClick={() => onAutoParse(customPrompt)}
+            disabled={autoParseLoading || !hasDocument}
+          >
+            {autoParseLoading ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+            ) : (
+              <ScanSearch className="w-3.5 h-3.5 mr-1" />
+            )}
+            自动解析
+          </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-l-none px-1.5"
+                disabled={autoParseLoading}
+              >
+                <ChevronDownIcon className="w-3.5 h-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80" align="end">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium mb-1">自定义解析提示词</p>
+                  <p className="text-xs text-muted-foreground mb-2">调整提示词以控制 AI 如何提取文档大纲</p>
+                </div>
+                <Textarea
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  rows={6}
+                  className="text-sm"
+                  placeholder="请输入解析提示词..."
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setCustomPrompt(
+                        "请根据招标文件内容，提取完整的投标文件大纲结构。要求：\n1. 严格按照招标文件中的章节结构和编号\n2. 包含所有必须响应的章节\n3. 保留原始章节编号格式"
+                      )
+                    }
+                  >
+                    重置默认
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => onAutoParse(customPrompt)}
+                    disabled={autoParseLoading || !hasDocument}
+                  >
+                    开始解析
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {/* 大纲导入 */}
+        <Button size="sm" variant="outline" onClick={onImportOutline}>
+          <FolderInput className="w-3.5 h-3.5 mr-1" />大纲导入
+        </Button>
+
+        {/* 自动编号 */}
         <Button size="sm" variant="outline" onClick={onAutoNumber}>
           <ListOrdered className="w-3.5 h-3.5 mr-1" />自动编号
         </Button>
