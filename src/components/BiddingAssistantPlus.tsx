@@ -20,6 +20,22 @@ import type { InsertPosition } from "@/components/bidding-plus/types";
  * Parse a blob into rich content (HTML for DOCX, page images for PDF).
  * Also extracts plain text for AI operations.
  */
+/**
+ * Detect actual file type from magic bytes, not extension.
+ */
+async function detectFileType(blob: Blob): Promise<"pdf" | "docx" | "txt" | "unknown"> {
+  const header = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+  // PDF: %PDF
+  if (header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) {
+    return "pdf";
+  }
+  // ZIP (DOCX is a ZIP): PK\x03\x04
+  if (header[0] === 0x50 && header[1] === 0x4B && header[2] === 0x03 && header[3] === 0x04) {
+    return "docx";
+  }
+  return "unknown";
+}
+
 async function parseDocumentBlob(
   blob: Blob,
   name: string,
@@ -27,13 +43,16 @@ async function parseDocumentBlob(
 ): Promise<{ content: DocContent; plainText: string }> {
   const lower = name.toLowerCase();
 
+  // Detect actual file type by magic bytes (handles .doc files that are actually PDFs)
+  const detectedType = await detectFileType(blob);
+
   // ---- DOCX → HTML via mammoth ----
-  if (lower.endsWith(".docx") || lower.endsWith(".doc")) {
+  const isDocx = detectedType === "docx" || (detectedType === "unknown" && lower.endsWith(".docx"));
+  if (isDocx) {
     onProgress?.("正在转换 DOCX 文档...");
     const mammoth = await import("mammoth");
     const arrayBuffer = await blob.arrayBuffer();
 
-    // Convert DOCX to HTML, embedding images as base64
     const result = await mammoth.convertToHtml(
       { arrayBuffer },
       {
@@ -45,7 +64,6 @@ async function parseDocumentBlob(
       }
     );
 
-    // Also extract raw text for AI
     const textResult = await mammoth.extractRawText({ arrayBuffer });
 
     return {
@@ -55,7 +73,8 @@ async function parseDocumentBlob(
   }
 
   // ---- PDF → pass raw data for canvas + text layer rendering ----
-  if (lower.endsWith(".pdf")) {
+  const isPdf = detectedType === "pdf" || (detectedType === "unknown" && lower.endsWith(".pdf"));
+  if (isPdf) {
     onProgress?.("正在加载 PDF...");
     const pdfjsLib = await import("pdfjs-dist");
     pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
@@ -63,7 +82,6 @@ async function parseDocumentBlob(
     const arrayBuffer = await blob.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-    // Extract text for AI operations
     const textParts: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       onProgress?.(`正在提取文本 ${i}/${pdf.numPages}...`);
