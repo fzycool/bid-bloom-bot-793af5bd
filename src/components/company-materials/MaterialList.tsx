@@ -304,10 +304,7 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                   </TableHead>
                 )}
                 <TableHead>文件名</TableHead>
-                <TableHead className="w-24">状态</TableHead>
                 <TableHead className="hidden md:table-cell">类型</TableHead>
-                <TableHead className="hidden lg:table-cell">颁发单位</TableHead>
-                <TableHead className="hidden lg:table-cell">证书编号</TableHead>
                 <TableHead className="hidden md:table-cell w-28">有效期</TableHead>
                 <TableHead className="w-20">大小</TableHead>
                 <TableHead className="w-16">操作</TableHead>
