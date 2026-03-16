@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from "react";
-import { Upload, FileText, Plus, Wand2, Loader2, ScrollText, FolderOpen } from "lucide-react";
+import { Upload, FileText, Plus, Wand2, Loader2, ScrollText, FolderOpen, ListTree } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
