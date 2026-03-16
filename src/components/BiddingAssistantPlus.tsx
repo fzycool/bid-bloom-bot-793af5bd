@@ -258,7 +258,7 @@ export default function BiddingAssistantPlus() {
           Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
-          documentText: text.slice(0, 30000),
+          documentText: text.slice(0, 200000),
         }),
       });
 
@@ -366,7 +366,7 @@ export default function BiddingAssistantPlus() {
           Authorization: `Bearer ${anonKey}`,
         },
         body: JSON.stringify({
-          documentText: plainText.slice(0, 30000),
+          documentText: plainText.slice(0, 200000),
           customPrompt,
         }),
       });
