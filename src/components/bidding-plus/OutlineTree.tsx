@@ -141,10 +141,18 @@ export default function OutlineTree({
   // Count children for collapsed badge
   const childCount = (id: string) => flatItems.filter((f) => f.parent_id === id).length;
 
+  const DEFAULT_PROMPT = "请根据招标文件内容，提取完整的投标文件大纲结构。要求：\n1. 严格按照招标文件中的章节结构和编号\n2. 包含所有必须响应的章节\n3. 保留原始章节编号格式";
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
-  const [customPrompt, setCustomPrompt] = useState(
-    "请根据招标文件内容，提取完整的投标文件大纲结构。要求：\n1. 严格按照招标文件中的章节结构和编号\n2. 包含所有必须响应的章节\n3. 保留原始章节编号格式"
-  );
+  const [customPrompt, setCustomPrompt] = useState(() => {
+    try {
+      return localStorage.getItem("bidding_plus_custom_prompt") || DEFAULT_PROMPT;
+    } catch { return DEFAULT_PROMPT; }
+  });
+
+  const savePrompt = (val: string) => {
+    setCustomPrompt(val);
+    try { localStorage.setItem("bidding_plus_custom_prompt", val); } catch {}
+  };
 
   return (
     <div className="space-y-0.5">
@@ -184,7 +192,7 @@ export default function OutlineTree({
                 </div>
                 <Textarea
                   value={customPrompt}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  onChange={(e) => savePrompt(e.target.value)}
                   rows={6}
                   className="text-sm"
                   placeholder="请输入解析提示词..."
@@ -193,11 +201,7 @@ export default function OutlineTree({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      setCustomPrompt(
-                        "请根据招标文件内容，提取完整的投标文件大纲结构。要求：\n1. 严格按照招标文件中的章节结构和编号\n2. 包含所有必须响应的章节\n3. 保留原始章节编号格式"
-                      )
-                    }
+                    onClick={() => savePrompt(DEFAULT_PROMPT)}
                   >
                     重置默认
                   </Button>
