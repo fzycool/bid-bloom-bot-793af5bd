@@ -584,52 +584,6 @@ export default function BiddingAssistantPlus() {
         </DialogContent>
       </Dialog>
 
-      {/* Load Framework Dialog */}
-      <Dialog open={frameworkDialogOpen} onOpenChange={setFrameworkDialogOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[70vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>载入投标文件框架</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">从已解析的招标项目中导入文档结构作为大纲框架</p>
-          <div className="flex-1 overflow-auto min-h-0 space-y-1 mt-2">
-            {loadingList ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : bidAnalyses.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                暂无招标解析记录，请先在「招标解析」模块上传并解析文件
-              </div>
-            ) : (
-              bidAnalyses.map((item) => {
-                const hasStructure = !!item.document_structure;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => handleLoadFramework(item)}
-                    disabled={!hasStructure}
-                    className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors",
-                      "hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed",
-                    )}
-                  >
-                    <ListTree className="w-4 h-4 text-muted-foreground shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">
-                        {item.project_name || "未命名项目"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(item.created_at).toLocaleDateString("zh-CN")}
-                        {!hasStructure && " · 无文档结构"}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
