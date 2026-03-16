@@ -363,7 +363,7 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
                         <span className="text-xs text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatSize(mat.file_size)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatSize(mat.file_size)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-0.5">
                         <Button
