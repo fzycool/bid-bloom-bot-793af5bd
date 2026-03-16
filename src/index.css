@@ -129,3 +129,85 @@
     box-shadow: var(--shadow-hero);
   }
 }
+
+/* DOCX HTML content styling - preserves original formatting */
+.doc-html-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: hsl(var(--foreground));
+  word-break: break-word;
+}
+
+.doc-html-content h1 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 1em 0 0.5em;
+  color: hsl(var(--foreground));
+}
+
+.doc-html-content h2 {
+  font-size: 1.3em;
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+}
+
+.doc-html-content h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+
+.doc-html-content p {
+  margin: 0.4em 0;
+}
+
+.doc-html-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+  font-size: 13px;
+}
+
+.doc-html-content table td,
+.doc-html-content table th {
+  border: 1px solid hsl(var(--border));
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc-html-content table th {
+  background: hsl(var(--muted));
+  font-weight: 600;
+}
+
+.doc-html-content table tr:nth-child(even) {
+  background: hsl(var(--muted) / 0.3);
+}
+
+.doc-html-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 0.5em 0;
+  border-radius: 4px;
+}
+
+.doc-html-content ul,
+.doc-html-content ol {
+  padding-left: 2em;
+  margin: 0.4em 0;
+}
+
+.doc-html-content li {
+  margin: 0.2em 0;
+}
+
+.doc-html-content strong,
+.doc-html-content b {
+  font-weight: 700;
+}
+
+.doc-html-content em,
+.doc-html-content i {
+  font-style: italic;
+}
