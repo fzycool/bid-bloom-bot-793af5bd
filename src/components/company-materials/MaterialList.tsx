@@ -257,10 +257,94 @@ export default function MaterialList({ folderId, onMaterialChange }: MaterialLis
     }
   };
 
+  const fetchFolders = useCallback(async () => {
+    const { data } = await supabase
+      .from("material_folders")
+      .select("id, name, parent_id, sort_order")
+      .order("sort_order");
+    setFolders(data || []);
+  }, []);
+
+  const openMoveDialog = () => {
+    setMoveTargetId(null);
+    setMoveExpanded(new Set());
+    fetchFolders();
+    setMoveDialogOpen(true);
+  };
+
+  const handleBatchMove = async () => {
+    if (!selectedIds.size) return;
+    setMoving(true);
+    try {
+      const { error } = await supabase
+        .from("company_materials")
+        .update({ folder_id: moveTargetId })
+        .in("id", Array.from(selectedIds));
+      if (error) throw error;
+      toast({ title: `已移动 ${selectedIds.size} 个文件` });
+      setSelectedIds(new Set());
+      setMoveDialogOpen(false);
+      fetchMaterials();
+      onMaterialChange?.();
+    } catch (err: any) {
+      toast({ title: "移动失败", description: err.message, variant: "destructive" });
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Build folder tree for move dialog
+  const buildFolderTree = (parentId: string | null): FolderItem[] => {
+    return folders
+      .filter((f) => f.parent_id === parentId)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+  };
+
+  const renderMoveFolderNode = (folder: FolderItem, depth: number): React.ReactNode => {
+    const children = buildFolderTree(folder.id);
+    const hasChildren = children.length > 0;
+    const isExpanded = moveExpanded.has(folder.id);
+    const isSelected = moveTargetId === folder.id;
+
+    return (
+      <div key={folder.id}>
+        <div
+          className={cn(
+            "flex items-center gap-1.5 py-1.5 px-2 rounded-md cursor-pointer text-sm transition-colors",
+            isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+          )}
+          style={{ paddingLeft: `${depth * 20 + 8}px` }}
+          onClick={() => setMoveTargetId(folder.id)}
+        >
+          {hasChildren ? (
+            <button
+              className="shrink-0 p-0.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMoveExpanded((prev) => {
+                  const next = new Set(prev);
+                  next.has(folder.id) ? next.delete(folder.id) : next.add(folder.id);
+                  return next;
+                });
+              }}
+            >
+              {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            </button>
+          ) : (
+            <span className="w-[18px] shrink-0" />
+          )}
+          <Folder className="w-4 h-4 shrink-0 text-amber-500" />
+          <span className="truncate">{folder.name}</span>
+        </div>
+        {isExpanded && children.map((child) => renderMoveFolderNode(child, depth + 1))}
+      </div>
+    );
   };
 
   return (
