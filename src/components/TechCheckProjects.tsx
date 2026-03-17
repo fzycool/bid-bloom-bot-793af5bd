@@ -56,45 +56,8 @@ interface FileUploadStatus {
   error?: string;
 }
 
-interface CheckItem {
-  id: string;
-  category: string;
-  title: string;
-  description: string;
-  status: "unchecked" | "pass" | "fail" | "warning";
-  notes: string;
-  severity: "critical" | "major" | "minor";
-}
-
-interface CheckList {
-  id: string;
-  name: string;
-  projectName: string;
-  items: CheckItem[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface QCResult {
-  itemIndex: number;
-  status: "pass" | "fail" | "warning";
-  score: number;
-  finding: string;
-  suggestion?: string;
-}
-
-interface QCReport {
-  results: QCResult[];
-  overallScore: number;
-  summary: string;
-  checkItems: CheckItem[];
-  projectName: string;
-  timestamp: string;
-}
-
 const ACCEPTED_BID = ".pdf,.docx,.doc";
 const ACCEPTED_PROPOSAL = ".docx,.doc";
-const STORAGE_KEY = "tech-bid-checklists";
 
 const formatSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
