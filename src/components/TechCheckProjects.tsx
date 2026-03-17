@@ -81,14 +81,10 @@ const TechCheckProjects = () => {
   const [errorLogs, setErrorLogs] = useState<{ name: string; reason: string }[]>([]);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
 
-  // Quality check state
-  const [showChecklistPicker, setShowChecklistPicker] = useState(false);
-  const [pickerProjectId, setPickerProjectId] = useState<string | null>(null);
-  const [selectedChecklistId, setSelectedChecklistId] = useState<string | null>(null);
-  const [qcRunning, setQcRunning] = useState<string | null>(null); // projectId currently running
-  const [qcProgress, setQcProgress] = useState(0);
-  const [qcReport, setQcReport] = useState<QCReport | null>(null);
-  const [showQcResult, setShowQcResult] = useState(false);
+
+  const bidInputRef = useRef<HTMLInputElement>(null);
+  const proposalInputRef = useRef<HTMLInputElement>(null);
+  const uploadProjectRef = useRef<string | null>(null);
 
   const bidInputRef = useRef<HTMLInputElement>(null);
   const proposalInputRef = useRef<HTMLInputElement>(null);
