@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -588,11 +589,11 @@ const TechCheckProjects = () => {
                     }`}
                     onClick={() => setSelectedChecklistId(cl.id)}
                   >
-                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
-                      isSelected ? "border-primary" : "border-muted-foreground/30"
-                    }`}>
-                      {isSelected && <div className="w-2 h-2 rounded-full bg-primary" />}
-                    </div>
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => setSelectedChecklistId(cl.id)}
+                      className="shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground">{cl.name}</p>
                       {cl.projectName && <p className="text-[10px] text-muted-foreground">{cl.projectName}</p>}
