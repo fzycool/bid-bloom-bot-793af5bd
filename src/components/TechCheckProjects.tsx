@@ -571,19 +571,28 @@ const TechCheckProjects = () => {
               <ClipboardCheck className="w-5 h-5 text-primary" />
               选择检查清单
             </DialogTitle>
-            <DialogDescription>选择一个检查清单，AI将根据清单中的检查项逐项检查技术方案</DialogDescription>
+            <DialogDescription>选择一个检查清单作为本次质检的依据，AI将根据清单中的检查项逐项检查技术方案</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[400px]">
             <div className="space-y-2 pr-2">
               {getChecklists().map((cl) => {
                 const total = cl.items.length;
+                const isSelected = selectedChecklistId === cl.id;
                 return (
                   <div
                     key={cl.id}
-                    className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors"
-                    onClick={() => pickerProjectId && runQualityCheck(pickerProjectId, cl)}
+                    className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                        : "hover:border-primary/40 hover:bg-primary/5"
+                    }`}
+                    onClick={() => setSelectedChecklistId(cl.id)}
                   >
-                    <ClipboardCheck className="w-5 h-5 text-primary shrink-0" />
+                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                      isSelected ? "border-primary" : "border-muted-foreground/30"
+                    }`}>
+                      {isSelected && <div className="w-2 h-2 rounded-full bg-primary" />}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground">{cl.name}</p>
                       {cl.projectName && <p className="text-[10px] text-muted-foreground">{cl.projectName}</p>}
@@ -594,6 +603,20 @@ const TechCheckProjects = () => {
               })}
             </div>
           </ScrollArea>
+          <div className="flex justify-end gap-2 pt-2 border-t">
+            <Button variant="outline" size="sm" onClick={() => setShowChecklistPicker(false)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={!selectedChecklistId}
+              onClick={handleConfirmQC}
+            >
+              <Play className="w-3.5 h-3.5" />
+              开始质检
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
