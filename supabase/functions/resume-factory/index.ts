@@ -608,14 +608,31 @@ Excel的格式可能包括但不限于：
         .download(templateFilePath);
       if (dlErr || !templateFile) throw new Error(`模板下载失败: ${dlErr?.message || "unknown"}`);
 
-      // Convert template to base64
-      const templateBuffer = await templateFile.arrayBuffer();
-      const templateUint8 = new Uint8Array(templateBuffer);
-      let templateB64 = "";
-      for (let i = 0; i < templateUint8.length; i++) {
-        templateB64 += String.fromCharCode(templateUint8[i]);
+      // Extract text content from the DOCX template (parse XML)
+      let templateTextContent = "";
+      try {
+        const JSZip = (await import("https://esm.sh/jszip@3.10.1")).default;
+        const zip = await JSZip.loadAsync(templateBuffer);
+        const docXml = await zip.file("word/document.xml")?.async("string");
+        if (docXml) {
+          // Extract text from XML tags, preserving structure
+          templateTextContent = docXml
+            .replace(/<w:tab\/>/g, "\t")
+            .replace(/<w:br[^>]*\/>/g, "\n")
+            .replace(/<\/w:p>/g, "\n")
+            .replace(/<\/w:tr>/g, "\n")
+            .replace(/<[^>]+>/g, "")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+        }
+      } catch (parseErr) {
+        console.error("Template DOCX parse error:", parseErr);
       }
-      templateB64 = btoa(templateB64);
+      if (!templateTextContent) {
+        templateTextContent = "（模板内容解析失败，请根据简历信息生成标准格式简历）";
+      }
+      // Limit template text to avoid exceeding token limits
+      templateTextContent = templateTextContent.substring(0, 6000);
 
       // Use AI to generate the filled DOCX content as structured JSON
       const emp = (resume as any).employees || {};
