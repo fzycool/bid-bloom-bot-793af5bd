@@ -657,13 +657,10 @@ Excel的格式可能包括但不限于：
             },
             {
               role: "user",
-              content: [
+               content: [
                 {
-                  type: "file",
-                  file: {
-                    filename: "template.docx",
-                    file_data: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${templateB64}`,
-                  },
+                  type: "text",
+                  text: `以下是Word模板的Base64编码内容（请分析其格式结构）：\n\ndata:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${templateB64}`,
                 },
                 {
                   type: "text",
