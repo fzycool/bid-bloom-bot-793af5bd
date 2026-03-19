@@ -749,7 +749,7 @@ ${JSON.stringify(resume.education_history || [], null, 2)}`,
               content: [
                 {
                   type: "text",
-                  text: `以下是Word模板的Base64编码内容（请分析其格式结构）：\n\ndata:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${templateB64}`,
+                  text: `以下是Word简历模板的文本内容（请分析其格式结构）：\n\n${templateTextContent}`,
                 },
                 {
                   type: "text",
